@@ -28,22 +28,6 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// DATA SMART FILTER WILAYAH KABUPATEN TAPIN (12 KECAMATAN LENGKAP)
-const TAPIN_WILAYAH = {
-  "Binuang": ["Binuang", "Raya Belanti", "A Yani Pura", "Karang Putih", "Pualam Sari", "Tungkap", "Padang Sari", "Gunung Tinggi"],
-  "Tapin Utara": ["Rangda Malingkung", "Kupang", "Rantau Kanan", "Rantau Kiwa", "Jingah Habang", "Keraton", "Perintis Raya", "Banua Halat Kiri", "Banua Halat Kanan", "Badaun", "Antasari", "Banua Hanyar"],
-  "Tapin Tengah": ["Pandahan", "Pandulangan", "Tirik", "Labung", "Mandurian", "Mandurian Hilir", "Ni'ah", "Sukaramai", "Kepayang", "Batang Lantik", "Hiyung", "Pabaungan Hilir", "Pabaungan Hulu", "Pabaungan Pantai"],
-  "Tapin Selatan": ["Tambarangan", "Lawahan", "Suato Tatakan", "Tatakan", "Harapan Masa", "Rumintin", "Sawang", "Timbaa", "Candi Laras"],
-  "Candi Laras Utara": ["Margasari Hilir", "Bawa Kapor", "Buas-Buas", "Keladan", "Pariok", "Kalumpang", "Sawaja", "Teluk Haur", "Batalas"],
-  "Candi Laras Selatan": ["Margasari Hulu", "Baulin", "Paring Guling", "Baringin A", "Baringin B", "Candi Laras", "Sungai Rutas", "Sungai Rutas Hulu"],
-  "Lokpaikat": ["Lokpaikat", "Bitahan", "Bitahan Baru", "Ayuning", "Bajuin", "Binderang", "Parandakan", "Puncak Harapan"],
-  "Salam Babaris": ["Salam Babaris", "Kembang Habang", "Suato Baru", "Pantai Cabe", "Kambang Habang Baru"],
-  "Bakarangan": ["Bakarangan", "Bundung", "Tangkawang", "Paul", "Gadung", "Tangkawang Baru", "Waringin"],
-  "Piani": ["Miawa", "Batu Ampar", "Pipitak Jaya", "Harakit", "Balawaian"],
-  "Bungur": ["Bungur", "Bungur Baru", "Purrut", "Banua Hanyar", "Rantau Nangka", "Sabah", "Timbung", "Linuh", "Parkit"],
-  "Hatungun": ["Hatungun", "Asam Randah", "Matang Ranum", "Burakai", "Bagus", "Pandulangan", "Tarungin", "Kambet"]
-};
-
 export default function Pengaduan({ staffList = [], isAdmin = false }) {
   const { showToast } = useToast();
 
@@ -52,6 +36,7 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
   // -------------------------------------------------------------
   const [complaints, setComplaints] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [wilayahData, setWilayahData] = useState({});
 
   // Smart Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,8 +56,8 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
     namaPengadu: '',
     noTelp: '',
     jenisPengaduan: '',
-    kecamatan: 'Tapin Utara',
-    desa: 'Rantau Kanan',
+    kecamatan: '',
+    desa: '',
     isiPengaduan: '',
     status: 'Baru', // 'Baru' | 'Diproses' | 'Selesai' | 'Ditolak'
     tindakLanjut: '',
@@ -82,9 +67,17 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
   const [newCategoryName, setNewCategoryName] = useState('');
 
   // -------------------------------------------------------------
-  // REALTIME LISTENERS FIREBASE
+  // REALTIME LISTENERS FIREBASE (PENGADUAN, KATEGORI, & MASTER WILAYAH)
   // -------------------------------------------------------------
   useEffect(() => {
+    // 1. Fetch Master Wilayah dari Realtime Database (config/wilayah)
+    const wilayahRef = ref(db, 'config/wilayah');
+    const unsubWilayah = onValue(wilayahRef, (snapshot) => {
+      const data = snapshot.val();
+      setWilayahData(data || {});
+    });
+
+    // 2. Fetch Data Pengaduan
     const complaintRef = ref(db, 'pengaduan');
     const unsubComplaint = onValue(complaintRef, (snapshot) => {
       const data = snapshot.val();
@@ -96,6 +89,7 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
       }
     });
 
+    // 3. Fetch Kategori Pengaduan
     const categoryRef = ref(db, 'categories_pengaduan');
     const unsubCat = onValue(categoryRef, (snapshot) => {
       const data = snapshot.val();
@@ -115,10 +109,13 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
     });
 
     return () => {
+      unsubWilayah();
       unsubComplaint();
       unsubCat();
     };
   }, []);
+
+  const allKecamatanKeys = Object.keys(wilayahData);
 
   const getStaffName = (id) => {
     const found = staffList.find((s) => (typeof s === 'object' ? s.id === id || s.name === id || s.NAMA === id : s === id));
@@ -147,7 +144,7 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
   // HANDLERS FORM & CRUD
   // -------------------------------------------------------------
   const handleKecamatanFormChange = (kec) => {
-    const desas = TAPIN_WILAYAH[kec] || [];
+    const desas = wilayahData[kec] || [];
     setForm((prev) => ({
       ...prev,
       kecamatan: kec,
@@ -157,12 +154,15 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
 
   const handleOpenAdd = () => {
     setEditingId(null);
+    const initialKec = allKecamatanKeys[0] || '';
+    const initialDesaList = wilayahData[initialKec] || [];
+
     setForm({
       namaPengadu: '',
       noTelp: '',
       jenisPengaduan: categories[0]?.name || 'Bantuan Sosial PKH Tidak Cair',
-      kecamatan: 'Tapin Utara',
-      desa: TAPIN_WILAYAH['Tapin Utara'][0],
+      kecamatan: initialKec,
+      desa: initialDesaList[0] || '',
       isiPengaduan: '',
       status: 'Baru',
       tindakLanjut: '',
@@ -173,11 +173,12 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
 
   const handleOpenEdit = (item) => {
     setEditingId(item.id);
+    const activeKec = item.kecamatan || allKecamatanKeys[0] || '';
     setForm({
       namaPengadu: item.namaPengadu || '',
       noTelp: item.noTelp || '',
       jenisPengaduan: item.jenisPengaduan || categories[0]?.name || '',
-      kecamatan: item.kecamatan || 'Tapin Utara',
+      kecamatan: activeKec,
       desa: item.desa || '',
       isiPengaduan: item.isiPengaduan || '',
       status: item.status || 'Baru',
@@ -427,11 +428,11 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
         </div>
       </div>
 
-      {/* SMART FILTER BAR WILAYAH KABUPATEN TAPIN */}
+      {/* SMART FILTER BAR WILAYAH KABUPATEN TAPIN (100% DINAMIS DARI DATABASE) */}
       <div className="p-4 sm:p-5 rounded-3xl bg-slate-900/80 border border-white/10 backdrop-blur-xl space-y-3 sm:space-y-4">
         <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs sm:text-sm">
           <FontAwesomeIcon icon={faFilter} />
-          <span>Smart Filter Wilayah & Kategori (Kabupaten Tapin)</span>
+          <span>Smart Filter Wilayah & Kategori (Database Realtime)</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3">
@@ -447,7 +448,7 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
             />
           </div>
 
-          {/* Kecamatan Filter */}
+          {/* Kecamatan Filter (Dinamis dari Firebase config/wilayah) */}
           <select
             value={selectedKecamatan}
             onChange={(e) => {
@@ -457,12 +458,12 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
             className="px-3 py-2.5 sm:py-2 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-indigo-500 cursor-pointer"
           >
             <option value="">-- Semua Kecamatan --</option>
-            {Object.keys(TAPIN_WILAYAH).map((kec) => (
+            {allKecamatanKeys.map((kec) => (
               <option key={kec} value={kec}>Kec. {kec}</option>
             ))}
           </select>
 
-          {/* Desa Filter */}
+          {/* Desa Filter (Dinamis dari Kecamatan Terpilih) */}
           <select
             value={selectedDesa}
             onChange={(e) => setSelectedDesa(e.target.value)}
@@ -470,7 +471,7 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
             className="px-3 py-2.5 sm:py-2 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-indigo-500 disabled:opacity-50 cursor-pointer"
           >
             <option value="">-- Semua Desa/Kel. --</option>
-            {selectedKecamatan && TAPIN_WILAYAH[selectedKecamatan].map((des) => (
+            {selectedKecamatan && (wilayahData[selectedKecamatan] || []).map((des) => (
               <option key={des} value={des}>Desa {des}</option>
             ))}
           </select>
@@ -640,15 +641,19 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Kecamatan (Kab. Tapin)</label>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Kecamatan (Database Wilayah)</label>
                   <select
                     value={form.kecamatan}
                     onChange={(e) => handleKecamatanFormChange(e.target.value)}
                     className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-indigo-500 cursor-pointer"
                   >
-                    {Object.keys(TAPIN_WILAYAH).map((kec) => (
-                      <option key={kec} value={kec}>Kec. {kec}</option>
-                    ))}
+                    {allKecamatanKeys.length > 0 ? (
+                      allKecamatanKeys.map((kec) => (
+                        <option key={kec} value={kec}>Kec. {kec}</option>
+                      ))
+                    ) : (
+                      <option value="">-- Wilayah Belum Diatur --</option>
+                    )}
                   </select>
                 </div>
 
@@ -659,9 +664,13 @@ export default function Pengaduan({ staffList = [], isAdmin = false }) {
                     onChange={(e) => setForm({ ...form, desa: e.target.value })}
                     className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-indigo-500 cursor-pointer"
                   >
-                    {(TAPIN_WILAYAH[form.kecamatan] || []).map((des) => (
-                      <option key={des} value={des}>Desa {des}</option>
-                    ))}
+                    {(wilayahData[form.kecamatan] || []).length > 0 ? (
+                      (wilayahData[form.kecamatan] || []).map((des) => (
+                        <option key={des} value={des}>Desa {des}</option>
+                      ))
+                    ) : (
+                      <option value="">-- Tidak Ada Desa --</option>
+                    )}
                   </select>
                 </div>
               </div>
