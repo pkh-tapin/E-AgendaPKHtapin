@@ -49,7 +49,7 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
   const [title, setTitle] = useState('');
   const [dueDateTime, setDueDateTime] = useState('');
   const [targetType, setTargetType] = useState('all');
-  const [assignee, setAssignee] = useState('');
+  const [assignee, setAssignee] = useState([]); // Support Array Multi-Select SDM
   const [kecamatan, setKecamatan] = useState('');
 
   // Ticker Countdown Real-time (Setiap 1 detik)
@@ -84,7 +84,7 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
     setTitle('');
     setDueDateTime('');
     setTargetType('all');
-    setAssignee('');
+    setAssignee([]);
     setKecamatan('');
   };
 
@@ -110,11 +110,31 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
     }
 
     setTargetType(task.targetType || 'all');
-    setAssignee(task.assignee || '');
+    
+    // Multi-Select Assignee Parsing
+    let parsedAssignee = [];
+    if (Array.isArray(task.assignee)) {
+      parsedAssignee = task.assignee;
+    } else if (typeof task.assignee === 'string' && task.assignee.trim()) {
+      parsedAssignee = task.assignee.split(',').map((a) => a.trim()).filter(Boolean);
+    }
+    setAssignee(parsedAssignee);
     setKecamatan(task.kecamatan || '');
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
     showToast(`Mode Edit: "${task.title}"`, 'info');
+  };
+
+  // Handler Toggle Checklist Multi-Select SDM
+  const handleAssigneeToggle = (sId) => {
+    setAssignee((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      if (current.includes(sId)) {
+        return current.filter((id) => id !== sId);
+      } else {
+        return [...current, sId];
+      }
+    });
   };
 
   // Simpan / Edit Tugas (CRUD - CREATE / UPDATE)
@@ -125,8 +145,8 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
       return showToast('Judul tugas dan tanggal/jam deadline wajib diisi!', 'error');
     }
 
-    if (targetType === 'specific' && !assignee) {
-      return showToast('Pilih nama SDM tertentu!', 'error');
+    if (targetType === 'specific' && (!assignee || (Array.isArray(assignee) && assignee.length === 0))) {
+      return showToast('Pilih minimal satu petugas SDM!', 'error');
     }
 
     if (targetType === 'kecamatan' && !kecamatan.trim()) {
@@ -143,7 +163,7 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
       dueDateTime: targetDateObj.toISOString(),
       dueDateTimestamp: targetDateObj.getTime(),
       targetType,
-      assignee: targetType === 'specific' ? assignee : '',
+      assignee: targetType === 'specific' ? assignee : [],
       kecamatan: targetType === 'kecamatan' ? kecamatan.trim() : '',
       updatedAt: Date.now()
     };
@@ -227,7 +247,20 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
     reader.readAsText(file);
   };
 
-  const getStaffName = (id) => staffList.find((s) => s.id === id || s.key === id || s.NAMA === id || s.name === id)?.name || staffList.find((s) => s.id === id)?.NAMA || id;
+  // Helper Resolver Nama SDM (Support Multi-Select Array & Single String)
+  const getStaffName = (id) => {
+    if (!id) return '-';
+    if (Array.isArray(id)) {
+      if (id.length === 0) return '-';
+      return id
+        .map((singleId) => getStaffName(singleId))
+        .filter((name) => name && name !== '-')
+        .join(', ');
+    }
+    const found = staffList.find((s) => s.id === id || s.key === id || s.NAMA === id || s.name === id);
+    if (found) return found.name || found.NAMA || found.nama || found.id;
+    return id;
+  };
 
   const getCountdown = (targetDateInput) => {
     const targetTime = new Date(targetDateInput).getTime();
@@ -389,7 +422,7 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
                 <FontAwesomeIcon icon={faUser} className="text-emerald-400 text-base sm:text-lg shrink-0" />
                 <div className="min-w-0">
                   <span className="font-bold text-xs block text-white truncate">SDM Tertentu</span>
-                  <span className="text-[10px] text-slate-400 block truncate">Nama petugas spesifik</span>
+                  <span className="text-[10px] text-slate-400 block truncate">Multi-select checklist</span>
                 </div>
               </button>
 
@@ -411,23 +444,51 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
             </div>
           </div>
 
+          {/* MULTI-SELECT CHECKLIST UNTUK SDM TERTERTU */}
           {targetType === 'specific' && (
-            <div className="animate-fadeIn">
-              <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block mb-1.5">Pilih Nama Petugas SDM</label>
-              <select
-                value={assignee}
-                onChange={(e) => setAssignee(e.target.value)}
-                className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950/80 border border-white/10 text-white text-xs sm:text-sm outline-none focus:border-emerald-500 cursor-pointer"
-              >
-                <option value="">-- Pilih Nama SDM --</option>
-                {staffList.map((s, idx) => {
-                  const sName = s.name || s.NAMA || s.nama || s.id;
-                  const sId = s.id || s.key || idx;
-                  return (
-                    <option key={sId} value={sId}>{sName}</option>
-                  );
-                })}
-              </select>
+            <div className="animate-fadeIn space-y-2">
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block">
+                  Pilih Petugas SDM (Checklist Multi-Select)
+                </label>
+                <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                  {Array.isArray(assignee) ? assignee.length : 0} Terpilih
+                </span>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto p-2.5 rounded-2xl bg-slate-950/80 border border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2 custom-scrollbar">
+                {staffList && staffList.length > 0 ? (
+                  staffList.map((s, idx) => {
+                    const sName = s.name || s.NAMA || s.nama || s.id;
+                    const sId = s.id || s.key || sName;
+                    const currentAssignees = Array.isArray(assignee) ? assignee : [];
+                    const isChecked = currentAssignees.includes(sId) || currentAssignees.includes(sName);
+
+                    return (
+                      <label
+                        key={sId || idx}
+                        className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all active:scale-[0.98] ${
+                          isChecked
+                            ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                            : 'bg-white/5 border-transparent text-slate-300 hover:bg-white/10'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleAssigneeToggle(sId)}
+                          className="rounded accent-emerald-500 w-4 h-4 cursor-pointer shrink-0"
+                        />
+                        <span className="truncate">{sName}</span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <p className="col-span-full text-slate-500 italic text-xs py-3 text-center">
+                    Memuat daftar SDM...
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
