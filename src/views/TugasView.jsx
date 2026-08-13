@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { db, ref, push, remove, set } from '../firebase';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { db, ref, push, remove, set, onValue } from '../firebase';
 import { useToast } from '../context/ToastContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
@@ -19,6 +19,9 @@ import {
   faTimes,
   faCheckCircle
 } from '@fortawesome/free-solid-svg-icons';
+
+// DAFTAR NAMA DUMMY LEGACY UNTUK DISARING TOTAL
+const DUMMY_SAMPLE_NAMES = ['ahmad', 'budi', 'siti', 'dewi', 'eko', 'fajar', 'gita', 'hadi'];
 
 export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenLogin }) {
   const { showToast } = useToast();
@@ -43,6 +46,82 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
     const timer = setInterval(checkAdmin, 500); // Polling sync dengan sidebar
     return () => clearInterval(timer);
   }, [isAdmin]);
+
+  // -------------------------------------------------------------
+  // REALTIME SDM DATABASE LISTENER & SANITIZER (MURNI DATABASE)
+  // -------------------------------------------------------------
+  const [dbStaffList, setDbStaffList] = useState([]);
+
+  useEffect(() => {
+    const staffRef = ref(db, 'staff');
+    const unsubscribe = onValue(staffRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data && typeof data === 'object') {
+        const list = Object.entries(data).map(([id, val]) => {
+          if (typeof val === 'string') return { id, name: val, isDummyString: true };
+          return { id, ...val, name: val.name || val.NAMA || val.nama || id };
+        });
+        setDbStaffList(list);
+      } else {
+        setDbStaffList([]);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Gabungkan prop staffList dan dbStaffList lalu bersihkan dari nama dummy
+  const cleanStaffList = useMemo(() => {
+    const sourceList = dbStaffList.length > 0 ? dbStaffList : staffList;
+    if (!sourceList) return [];
+
+    let list = [];
+    if (Array.isArray(sourceList)) {
+      list = sourceList.map((item, index) => {
+        if (typeof item === 'string') {
+          return { id: String(index), name: item, isDummyString: true };
+        }
+        const realId = item.id || item.key || item._id || item.firebaseKey || String(index);
+        const resolvedName = item.NAMA || item.nama || item.name || '-';
+        return { 
+          ...item, 
+          id: String(realId),
+          name: resolvedName,
+          NAMA: resolvedName
+        };
+      });
+    } else if (typeof sourceList === 'object' && sourceList !== null) {
+      list = Object.entries(sourceList).map(([key, val]) => {
+        if (typeof val === 'string') {
+          return { id: key, name: val, isDummyString: true };
+        }
+        const resolvedName = val.NAMA || val.nama || val.name || '-';
+        return { 
+          ...val, 
+          id: key,
+          name: resolvedName,
+          NAMA: resolvedName
+        };
+      });
+    }
+
+    // Hanya mereturn SDM sah dari database & membuang nama sample dummy
+    return list.filter((s) => {
+      if (!s || !s.name || typeof s.name !== 'string' || s.name.trim() === '' || s.name === '-') return false;
+      if (s.isDummyString) return false;
+
+      const lowerName = s.name.toLowerCase().trim();
+      const isSampleName = DUMMY_SAMPLE_NAMES.includes(lowerName);
+      const isNumericId = !s.id || s.id.length < 5 || /^s\d+$/i.test(s.id);
+      const hasNoDetails = (!s.NIP || s.NIP === '-') && (!s.nik || s.nik === '-') && (!s.phone || s.phone === '-');
+
+      if (isSampleName && (isNumericId || hasNoDetails)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [dbStaffList, staffList]);
 
   // State Form Input
   const [editingTaskId, setEditingTaskId] = useState(null);
@@ -257,7 +336,7 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
         .filter((name) => name && name !== '-')
         .join(', ');
     }
-    const found = staffList.find((s) => s.id === id || s.key === id || s.NAMA === id || s.name === id);
+    const found = cleanStaffList.find((s) => s.id === id || s.key === id || s.NAMA === id || s.name === id);
     if (found) return found.name || found.NAMA || found.nama || found.id;
     return id;
   };
@@ -444,12 +523,12 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
             </div>
           </div>
 
-          {/* MULTI-SELECT CHECKLIST UNTUK SDM TERTERTU */}
+          {/* MULTI-SELECT CHECKLIST UNTUK SDM TERTERTU (MURNI DARI DATABASE SDM) */}
           {targetType === 'specific' && (
             <div className="animate-fadeIn space-y-2">
               <div className="flex justify-between items-center mb-1">
                 <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block">
-                  Pilih Petugas SDM (Checklist Multi-Select)
+                  Pilih Petugas SDM ({cleanStaffList.length} Orang Terdaftar di Database)
                 </label>
                 <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
                   {Array.isArray(assignee) ? assignee.length : 0} Terpilih
@@ -457,8 +536,8 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
               </div>
 
               <div className="max-h-48 overflow-y-auto p-2.5 rounded-2xl bg-slate-950/80 border border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2 custom-scrollbar">
-                {staffList && staffList.length > 0 ? (
-                  staffList.map((s, idx) => {
+                {cleanStaffList && cleanStaffList.length > 0 ? (
+                  cleanStaffList.map((s, idx) => {
                     const sName = s.name || s.NAMA || s.nama || s.id;
                     const sId = s.id || s.key || sName;
                     const currentAssignees = Array.isArray(assignee) ? assignee : [];
@@ -485,7 +564,7 @@ export default function TasksView({ tasks = [], staffList = [], isAdmin, onOpenL
                   })
                 ) : (
                   <p className="col-span-full text-slate-500 italic text-xs py-3 text-center">
-                    Memuat daftar SDM...
+                    Belum ada data SDM terdaftar di Database. Silakan tambah/import SDM di menu Kelola SDM.
                   </p>
                 )}
               </div>
