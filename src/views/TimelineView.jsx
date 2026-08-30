@@ -51,6 +51,23 @@ export default function TimelineView({ agendas = [], tasks = [], staffList = [] 
     return `${dayName}, ${dayNum} ${monthName} ${year}`;
   };
 
+  // Helper: Ekstrak Jam & Tanggal ke Zona Waktu Lokal (Mengatasi bug timezone UTC)
+  const getLocalFormat = (input) => {
+    if (!input) return { dateStr: '', timeStr: '23:59' };
+    
+    // Jika format bukan ISO String (tidak ada 'T'), kembalikan aslinya
+    if (!input.includes('T')) return { dateStr: input, timeStr: '23:59' };
+    
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return { dateStr: input.split('T')[0], timeStr: '23:59' };
+    
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    
+    return { dateStr, timeStr };
+  };
+
   // Hitung Mundur Waktu Kegiatan (Realtime Countdown Ultra Elegant)
   const renderCountdown = (dateStr, timeStr) => {
     if (!dateStr) return null;
@@ -89,30 +106,48 @@ export default function TimelineView({ agendas = [], tasks = [], staffList = [] 
     );
   };
 
-  // Gabungkan Agenda & Tugas ke dalam Timeline Terurut Tanggal
+  // Gabungkan Agenda & Tugas ke dalam Timeline Terurut Tanggal dengan Waktu Lokal
   const timelineItems = [
-    ...agendas.map((ag) => ({
-      type: 'agenda',
-      id: ag.id,
-      title: ag.title,
-      date: ag.date,
-      time: ag.time,
-      location: `Desa ${ag.desa || '-'}, Kec. ${ag.kecamatan || 'Tapin Utara'}`,
-      category: ag.category || 'Agenda SDM',
-      isSupervisi: ag.isSupervisiKatim,
-      assigneeName: ag.sdmName || (ag.assignee ? getStaffName(ag.assignee) : 'Tim Lapangan')
-    })),
-    ...tasks.map((tk) => ({
-      type: 'task',
-      id: tk.id,
-      title: tk.title,
-      date: tk.dueDate ? tk.dueDate.split('T')[0] : (tk.dueDateTime ? tk.dueDateTime.split('T')[0] : ''),
-      time: tk.dueDate && tk.dueDate.includes('T') ? tk.dueDate.split('T')[1] : (tk.dueDateTime && tk.dueDateTime.includes('T') ? tk.dueDateTime.split('T')[1].slice(0, 5) : '23:59'),
-      location: 'Kantor / Online',
-      category: 'Deadline Tugas',
-      isSupervisi: false,
-      assigneeName: getStaffName(tk.assignee)
-    }))
+    ...agendas.map((ag) => {
+      let dateVal = ag.date;
+      let timeVal = ag.time;
+      
+      // Sinkronisasi khusus jika Agenda menggunakan format ISO
+      if (ag.date && ag.date.includes('T')) {
+        const localObj = getLocalFormat(ag.date);
+        dateVal = localObj.dateStr;
+        if (!ag.time) timeVal = localObj.timeStr;
+      }
+
+      return {
+        type: 'agenda',
+        id: ag.id,
+        title: ag.title,
+        date: dateVal,
+        time: timeVal || '00:00',
+        location: `Desa ${ag.desa || '-'}, Kec. ${ag.kecamatan || 'Tapin Utara'}`,
+        category: ag.category || 'Agenda SDM',
+        isSupervisi: ag.isSupervisiKatim,
+        assigneeName: ag.sdmName || (ag.assignee ? getStaffName(ag.assignee) : 'Tim Lapangan')
+      };
+    }),
+    ...tasks.map((tk) => {
+      // Sinkronisasi jam tugas ke zona waktu lokal
+      const rawDate = tk.dueDateTime || tk.dueDate || '';
+      const localObj = getLocalFormat(rawDate);
+
+      return {
+        type: 'task',
+        id: tk.id,
+        title: tk.title,
+        date: localObj.dateStr,
+        time: localObj.timeStr,
+        location: 'Kantor / Online',
+        category: 'Deadline Tugas',
+        isSupervisi: false,
+        assigneeName: getStaffName(tk.assignee)
+      };
+    })
   ].sort((a, b) => {
     const timeA = new Date(`${a.date || '1970-01-01'}T${a.time || '00:00'}`).getTime();
     const timeB = new Date(`${b.date || '1970-01-01'}T${b.time || '00:00'}`).getTime();
