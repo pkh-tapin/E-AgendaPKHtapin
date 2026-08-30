@@ -24,7 +24,8 @@ import {
   faBullhorn,
   faStickyNote,
   faExclamationCircle,
-  faCheckCircle
+  faCheckCircle,
+  faListAlt
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function Dashboard({ 
@@ -191,6 +192,9 @@ export default function Dashboard({
   
   const sortedDates = Object.keys(groupedItems).sort((a,b) => new Date(a) - new Date(b));
 
+  // Ambil data spesifik untuk Tabel Rincian Hari Ini
+  const todayItems = groupedItems[todayStr] || [];
+
   // Calculation Countdown Engine Terpusat
   const getCountdown = (targetTime) => {
     const diff = targetTime - nowTimestamp;
@@ -340,7 +344,7 @@ export default function Dashboard({
   const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10">
+    <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10 overflow-hidden">
       
       {/* ------------------------------------------------------------- */}
       {/* HEADER WIDGET JAM DIGITAL 3D */}
@@ -402,9 +406,101 @@ export default function Dashboard({
       </div>
 
       {/* ------------------------------------------------------------- */}
+      {/* FITUR BARU: TABEL RINCIAN KEGIATAN HARI INI (MOBILE-FIRST)  */}
+      {/* ------------------------------------------------------------- */}
+      <div className="space-y-4 sm:space-y-6 pt-2 relative z-10 w-full">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white border-b border-white/10 pb-3">
+          <div className="flex items-center gap-3">
+            <FontAwesomeIcon icon={faListAlt} className="text-xl sm:text-2xl text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]" />
+            <h2 className="text-lg sm:text-2xl font-black tracking-wide uppercase drop-shadow-lg text-transparent bg-clip-text bg-gradient-to-r from-emerald-100 to-emerald-400">
+              Rincian Kegiatan Hari Ini
+            </h2>
+          </div>
+          <span className="text-xs font-bold text-emerald-300 bg-emerald-900/50 px-3 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 w-fit shadow-inner">
+            <FontAwesomeIcon icon={faCalendarCheck} />
+            Total: {todayItems.length} Aktivitas
+          </span>
+        </div>
+
+        <div className="rounded-[24px] bg-slate-900/80 border border-emerald-500/30 backdrop-blur-xl shadow-2xl overflow-hidden group hover:border-emerald-500/60 transition-all duration-300 w-full">
+          <div className="overflow-x-auto custom-scrollbar w-full">
+            <table className="w-full text-left border-collapse min-w-[700px]">
+              <thead>
+                <tr className="bg-slate-950/90 text-slate-300 text-[10px] sm:text-xs uppercase tracking-widest border-b border-white/10">
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Judul Kegiatan</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Kategori</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Waktu Pelaksanaan</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Status / Hitung Mundur</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 text-xs sm:text-sm text-slate-200">
+                {todayItems.length > 0 ? (
+                  todayItems.map((item, idx) => {
+                    const countdown = getCountdown(item.timestamp);
+                    const isTask = item.itemType === 'task';
+                    return (
+                      <tr key={idx} className="hover:bg-white/5 transition-colors duration-200 group/row">
+                        <td className="p-4 sm:p-5 font-bold break-words min-w-[220px]">
+                          <span className={isTask ? "text-rose-100 group-hover/row:text-rose-300" : "text-cyan-100 group-hover/row:text-cyan-300"}>
+                            {item.title}
+                          </span>
+                        </td>
+                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+                          {isTask ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest border border-rose-500/30 uppercase">
+                              <FontAwesomeIcon icon={faTasks} /> Deadline
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest border border-cyan-500/30 uppercase">
+                              <FontAwesomeIcon icon={faCalendarCheck} /> Agenda
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 sm:p-5 whitespace-nowrap font-mono font-bold">
+                          <span className="bg-slate-950/80 px-3 py-1.5 rounded-lg border border-white/10 text-amber-300 shadow-inner flex items-center gap-2 w-fit">
+                            <FontAwesomeIcon icon={faClock} className={isTask ? "text-rose-400" : "text-cyan-400"} />
+                            {item.sortTime} WITA
+                          </span>
+                        </td>
+                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+                          {countdown.isExpired ? (
+                            <span className="text-rose-400 font-black text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5">
+                              <FontAwesomeIcon icon={faTimes} /> Terlewati
+                            </span>
+                          ) : (
+                            <div className="font-mono font-bold text-emerald-300 text-[11px] sm:text-xs flex items-center gap-1.5 bg-slate-950/60 px-3 py-1.5 rounded-lg w-fit border border-emerald-500/20">
+                              <span className="relative flex h-2 w-2 mr-1">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                              </span>
+                              {countdown.days > 0 && <span className="text-emerald-100">{countdown.days}h</span>}
+                              <span>{String(countdown.hours).padStart(2,'0')}j</span>
+                              <span>{String(countdown.minutes).padStart(2,'0')}m</span>
+                              <span className="text-cyan-300 animate-pulse">{String(countdown.seconds).padStart(2,'0')}d</span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="4" className="p-10 text-center text-slate-400 italic text-xs sm:text-sm bg-slate-900/30">
+                      <FontAwesomeIcon icon={faCheckCircle} className="text-3xl text-slate-600 mb-3 block mx-auto" />
+                      Tidak ada rincian kegiatan atau tugas untuk hari ini.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
       {/* SECTION UTAMA: JADWAL & DEADLINE TERPADU (GROUPED BY DATE) */}
       {/* ------------------------------------------------------------- */}
-      <div className="space-y-5 sm:space-y-6 relative mt-10">
+      <div className="space-y-5 sm:space-y-6 relative mt-10 w-full">
         {/* Glow Background Header */}
         <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-cyan-500/10 rounded-3xl blur-xl pointer-events-none"></div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white relative z-10 px-2 border-b border-white/10 pb-4">
@@ -414,7 +510,7 @@ export default function Dashboard({
               Jadwal Kegiatan & Deadline Tugas
             </h2>
           </div>
-          <span className="text-xs font-bold text-slate-400 bg-slate-900/50 px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 w-fit">
+          <span className="text-xs font-bold text-slate-400 bg-slate-900/50 px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 w-fit shrink-0">
             <span className="relative flex h-2.5 w-2.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
@@ -423,59 +519,53 @@ export default function Dashboard({
           </span>
         </div>
 
-        <div className="space-y-8 relative z-10">
+        <div className="space-y-8 relative z-10 w-full">
           {sortedDates.length > 0 ? (
             sortedDates.map(dateStr => {
               const items = groupedItems[dateStr];
-              
-              // Animasi Ringan untuk Hari Ini
               const isToday = dateStr === todayStr;
 
               return (
-                <div key={dateStr} className={`p-1 rounded-[28px] bg-gradient-to-br from-slate-800/90 to-slate-900/95 shadow-2xl overflow-hidden transition-all duration-300 relative group/card border ${isToday ? 'border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-slate-600/40 hover:border-slate-500/80'}`}>
+                <div key={dateStr} className={`p-1 rounded-[28px] bg-gradient-to-br from-slate-800/90 to-slate-900/95 shadow-2xl overflow-hidden transition-all duration-300 relative group/card border w-full ${isToday ? 'border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-slate-600/40 hover:border-slate-500/80'}`}>
                   
                   {isToday && <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse-slow"></div>}
 
-                  <div className="p-4 sm:p-6 bg-slate-950/70 rounded-[24px] backdrop-blur-xl">
+                  <div className="p-4 sm:p-6 bg-slate-950/70 rounded-[24px] backdrop-blur-xl w-full">
                     {/* --- HEADER TANGGAL CARD --- */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-700/60">
                       <div className="flex items-center gap-4">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner border ${isToday ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-slate-800 text-slate-400 border-slate-600'}`}>
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 ${isToday ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-slate-800 text-slate-400 border-slate-600'}`}>
                           <FontAwesomeIcon icon={faCalendarAlt} className="text-2xl sm:text-3xl" />
                         </div>
-                        <div>
-                          <h3 className={`text-lg sm:text-2xl font-black uppercase tracking-wide drop-shadow-md ${isToday ? 'text-indigo-200' : 'text-slate-100'}`}>
+                        <div className="min-w-0">
+                          <h3 className={`text-lg sm:text-2xl font-black uppercase tracking-wide drop-shadow-md truncate ${isToday ? 'text-indigo-200' : 'text-slate-100'}`}>
                             {formatIndoDate(dateStr)}
                             {isToday && <span className="ml-2 text-[10px] sm:text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-widest align-middle">Hari Ini</span>}
                           </h3>
-                          <p className="text-xs text-slate-400 font-medium mt-1">Total {items.length} aktivitas terdaftar pada tanggal ini.</p>
+                          <p className="text-xs text-slate-400 font-medium mt-1 truncate">Total {items.length} aktivitas terdaftar pada tanggal ini.</p>
                         </div>
                       </div>
                     </div>
 
                     {/* --- ISI LIST KARTU --- */}
-                    <div className="space-y-4 sm:space-y-5">
+                    <div className="space-y-4 sm:space-y-5 w-full">
                       {items.map((item, idx) => {
-                        
                         if (item.itemType === 'task') {
-                          // ==========================================
-                          // UI TUGAS / DEADLINE (MERAH - ROSE)
-                          // ==========================================
                           const countdown = getCountdown(item.timestamp);
                           return (
-                            <div key={idx} className="flex flex-col md:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-950/30 to-slate-900/60 border-l-[8px] border-l-rose-500 border-y border-r border-rose-500/20 hover:from-rose-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch">
+                            <div key={idx} className="flex flex-col lg:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-950/30 to-slate-900/60 border-l-[8px] border-l-rose-500 border-y border-r border-rose-500/20 hover:from-rose-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch w-full">
                               
                               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
                               {/* Kiri: Info Judul & Label */}
-                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3">
+                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3 min-w-0">
                                 <div>
                                   <div className="flex items-center gap-2 mb-2">
-                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
+                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.3)] shrink-0">
                                       <FontAwesomeIcon icon={faExclamationCircle} className="mr-1.5" /> DEADLINE TUGAS
                                     </span>
                                   </div>
-                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-rose-100 to-rose-300 uppercase tracking-wide leading-snug drop-shadow-md">
+                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-rose-100 to-rose-300 uppercase tracking-wide leading-snug drop-shadow-md break-words">
                                     {item.title}
                                   </h4>
                                 </div>
@@ -493,8 +583,7 @@ export default function Dashboard({
                               </div>
 
                               {/* Kanan: Panel Countdown Digital yang Rapih */}
-                              <div className="md:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-5">
-                                 
+                              <div className="lg:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-5">
                                  <div className="flex items-center gap-2 mb-2">
                                     <div className="relative flex h-2.5 w-2.5">
                                       <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${countdown.isExpired ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
@@ -504,7 +593,6 @@ export default function Dashboard({
                                       {countdown.isExpired ? 'STATUS: TERLEWATI' : 'SISA WAKTU DEADLINE'}
                                     </span>
                                  </div>
-
                                  <div className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center justify-center w-full min-w-[200px] shadow-inner backdrop-blur-md ${countdown.badgeClass}`}>
                                    {countdown.isExpired ? (
                                      <div className="flex items-center gap-2 animate-pulse text-rose-400">
@@ -535,7 +623,6 @@ export default function Dashboard({
                                    )}
                                  </div>
                               </div>
-
                             </div>
                           )
                         } else {
@@ -543,19 +630,19 @@ export default function Dashboard({
                           // UI AGENDA / KEGIATAN (BIRU - CYAN)
                           // ==========================================
                           return (
-                            <div key={idx} className="flex flex-col md:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/30 to-slate-900/60 border-l-[8px] border-l-cyan-500 border-y border-r border-cyan-500/20 hover:from-cyan-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch">
+                            <div key={idx} className="flex flex-col lg:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/30 to-slate-900/60 border-l-[8px] border-l-cyan-500 border-y border-r border-cyan-500/20 hover:from-cyan-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch w-full">
                               
                               <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
                               {/* Kiri: Info Judul & Label */}
-                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3">
+                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3 min-w-0">
                                 <div>
                                   <div className="flex items-center gap-2 mb-2">
-                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.3)]">
+                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.3)] shrink-0">
                                       <FontAwesomeIcon icon={faCheckCircle} className="mr-1.5" /> AGENDA KEGIATAN
                                     </span>
                                   </div>
-                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-100 to-cyan-300 uppercase tracking-wide leading-snug drop-shadow-md">
+                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-100 to-cyan-300 uppercase tracking-wide leading-snug drop-shadow-md break-words">
                                     {item.title}
                                   </h4>
                                 </div>
@@ -575,7 +662,7 @@ export default function Dashboard({
                               </div>
 
                               {/* Kanan: Label Jam Rapi */}
-                              <div className="md:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-5">
+                              <div className="lg:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-5">
                                  <div className="flex items-center gap-2 mb-2">
                                     <FontAwesomeIcon icon={faCalendarCheck} className="text-cyan-400 text-sm" />
                                     <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300">
@@ -603,7 +690,7 @@ export default function Dashboard({
               )
             })
           ) : (
-            <div className="text-center py-16 text-slate-400 italic text-sm border-2 border-dashed border-slate-600/50 rounded-[32px] bg-slate-900/30 shadow-inner">
+            <div className="text-center py-16 text-slate-400 italic text-sm border-2 border-dashed border-slate-600/50 rounded-[32px] bg-slate-900/30 shadow-inner w-full">
               <div className="mb-3">
                 <FontAwesomeIcon icon={faCalendarAlt} className="text-4xl text-slate-600" />
               </div>
@@ -695,7 +782,7 @@ export default function Dashboard({
       {/* ------------------------------------------------------------- */}
       {/* STATUS CARDS MINIMALIS (PIKET, AGENDA KECIL, & SWAP) */}
       {/* ------------------------------------------------------------- */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-emerald-400/60">
           <div className="flex items-center gap-2.5 mb-3 sm:mb-4 text-emerald-400 shrink-0">
             <FontAwesomeIcon icon={faUserShield} className="text-lg sm:text-xl" />
