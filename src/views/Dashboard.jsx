@@ -156,7 +156,7 @@ export default function Dashboard({
         isExpired: true,
         text: 'TERLEWATI',
         days: 0, hours: 0, minutes: 0, seconds: 0,
-        badgeClass: 'bg-rose-950/90 text-rose-300 border-rose-500/60 shadow-[0_0_15px_rgba(244,63,94,0.3)]'
+        badgeClass: 'bg-rose-950 text-rose-300 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.5)]'
       };
     }
 
@@ -165,9 +165,9 @@ export default function Dashboard({
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
-    let badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]';
+    let badgeClass = 'bg-indigo-950/80 text-indigo-300 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]';
     if (days === 0 && hours < 24) {
-      badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-500/50 animate-pulse shadow-[0_0_20px_rgba(245,158,11,0.3)]';
+      badgeClass = 'bg-rose-950/80 text-rose-300 border-rose-500/50 animate-pulse shadow-[0_0_25px_rgba(244,63,94,0.4)]';
     }
 
     return {
@@ -342,8 +342,91 @@ export default function Dashboard({
         </div>
       </div>
 
+      {/* POSISI 1: COUNTDOWNS DEADLINE TUGAS AKTIF - PINDAH KE ATAS AGAR JADI PERHATIAN UTAMA */}
+      <div className="space-y-4 sm:space-y-6 animate-pulse-slow relative">
+        <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-purple-500/10 rounded-3xl blur-lg pointer-events-none"></div>
+        <div className="flex items-center gap-2.5 text-rose-400 relative z-10 px-2">
+          <FontAwesomeIcon icon={faTasks} className="text-xl sm:text-2xl" />
+          <h2 className="text-lg sm:text-2xl font-bold text-white tracking-wide drop-shadow-[0_0_10px_rgba(244,63,94,0.5)]">
+            DEADLINE TUGAS (SEGERA DITINDAKLANJUTI)
+          </h2>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 relative z-10">
+          {tasks.length > 0 ? (
+            tasks.map((task) => {
+              const countdown = getCountdown(task.dueDateTime || task.deadline || task.dueDate);
+
+              return (
+                <div 
+                  key={task.id} 
+                  className="p-5 sm:p-6 rounded-3xl bg-slate-900/80 border-2 border-indigo-500/30 backdrop-blur-xl shadow-2xl flex flex-col justify-between hover:border-rose-400/60 transition-all duration-300 group overflow-hidden relative"
+                >
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-rose-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                  
+                  <div className="space-y-3">
+                    <h4 className="font-black text-white text-base sm:text-lg leading-snug group-hover:text-rose-200 transition-colors break-words">
+                      {task.title}
+                    </h4>
+
+                    <div className="flex flex-wrap gap-2">
+                      {task.targetType === 'all' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-[11px] font-bold">
+                          <FontAwesomeIcon icon={faGlobe} /> Seluruh SDM
+                        </span>
+                      )}
+                      {task.targetType === 'specific' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] font-bold">
+                          <FontAwesomeIcon icon={faUser} /> {getStaffName(task.assignee)}
+                        </span>
+                      )}
+                      {task.targetType === 'kecamatan' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 text-[11px] font-bold">
+                          <FontAwesomeIcon icon={faMapMarkerAlt} /> Kec. {task.kecamatan || '-'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-4 mt-4 border-t border-white/10 space-y-3">
+                    <div className="flex justify-between items-center text-xs text-slate-300">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <FontAwesomeIcon icon={faCalendarAlt} className="text-indigo-400" />
+                        <span>{formatDateTime(task.dueDateTime || task.deadline || task.dueDate)}</span>
+                      </span>
+                    </div>
+
+                    <div className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-2 sm:gap-4 ${countdown.badgeClass}`}>
+                      <span className="text-xs sm:text-sm font-black tracking-wider uppercase flex items-center gap-2">
+                        <FontAwesomeIcon icon={countdown.isExpired ? faExclamationTriangle : faHourglassHalf} className={countdown.isExpired ? 'text-2xl' : 'animate-spin-slow'} />
+                        <span>Sisa Waktu:</span>
+                      </span>
+
+                      {countdown.isExpired ? (
+                        <span className="font-black text-lg sm:text-xl uppercase tracking-widest text-rose-300 animate-pulse drop-shadow-[0_0_10px_rgba(244,63,94,0.8)]">TERLEWATI</span>
+                      ) : (
+                        <div className="font-mono font-black text-xl sm:text-2xl lg:text-3xl flex items-baseline gap-1.5 drop-shadow-md">
+                          {countdown.days > 0 && <span className="text-rose-200">{countdown.days}<span className="text-xs sm:text-sm ml-0.5 font-bold">H</span></span>}
+                          <span className="text-amber-200">{String(countdown.hours).padStart(2, '0')}<span className="text-xs sm:text-sm ml-0.5 font-bold">J</span></span>
+                          <span className="text-emerald-200">{String(countdown.minutes).padStart(2, '0')}<span className="text-xs sm:text-sm ml-0.5 font-bold">M</span></span>
+                          <span className="text-cyan-200 animate-pulse">{String(countdown.seconds).padStart(2, '0')}<span className="text-xs sm:text-sm ml-0.5 font-bold">D</span></span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="col-span-full text-center py-12 text-slate-400 italic text-sm border-2 border-dashed border-white/10 rounded-3xl bg-slate-900/50">
+              Belum ada tugas atau deadline yang aktif saat ini.
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* DUAL SECTION: PAPAN PENGUMUMAN & PAPAN CATATAN SDM */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 pt-4 border-t border-white/10">
         {/* PAPAN INFORMASI & PENGUMUMAN */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-amber-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
           <div className="flex justify-between items-center flex-wrap gap-2">
@@ -421,7 +504,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* Grid Status Cards */}
+      {/* Grid Status Cards (Piket, Agenda, Laporan Pertukaran) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         {/* Card 1: Piket Hari Ini */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-emerald-400/60">
@@ -589,84 +672,6 @@ export default function Dashboard({
               </div>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Countdowns Deadline TUGAS AKTIF */}
-      <div className="pt-4 border-t border-white/10 space-y-4 sm:space-y-6">
-        <div className="flex items-center gap-2.5 text-indigo-400">
-          <FontAwesomeIcon icon={faTasks} className="text-xl sm:text-2xl" />
-          <h2 className="text-lg sm:text-2xl font-bold text-white">Mendekati Deadline Tugas (Live)</h2>
-        </div>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {tasks.length > 0 ? (
-            tasks.map((task) => {
-              const countdown = getCountdown(task.dueDateTime || task.deadline || task.dueDate);
-
-              return (
-                <div 
-                  key={task.id} 
-                  className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-xl shadow-3d-glass flex flex-col justify-between space-y-3 sm:space-y-4 hover:border-indigo-500/50 hover:-translate-y-1 transition-all duration-300 group"
-                >
-                  <div className="space-y-2.5">
-                    <h4 className="font-bold text-white text-xs sm:text-sm leading-snug group-hover:text-indigo-200 transition-colors break-words">
-                      {task.title}
-                    </h4>
-
-                    <div>
-                      {task.targetType === 'all' && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-[10px] font-bold">
-                          <FontAwesomeIcon icon={faGlobe} /> Seluruh SDM
-                        </span>
-                      )}
-                      {task.targetType === 'specific' && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[10px] font-bold">
-                          <FontAwesomeIcon icon={faUser} /> SDM: {getStaffName(task.assignee)}
-                        </span>
-                      )}
-                      {task.targetType === 'kecamatan' && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 text-[10px] font-bold">
-                          <FontAwesomeIcon icon={faMapMarkerAlt} /> Kec. {task.kecamatan || '-'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-2.5 border-t border-white/10 space-y-2">
-                    <div className="flex justify-between items-center text-[11px] text-slate-300">
-                      <span className="flex items-center gap-1.5">
-                        <FontAwesomeIcon icon={faCalendarAlt} className="text-indigo-400" />
-                        <span>{formatDateTime(task.dueDateTime || task.deadline || task.dueDate)}</span>
-                      </span>
-                    </div>
-
-                    <div className={`p-2.5 rounded-xl border flex items-center justify-between ${countdown.badgeClass}`}>
-                      <span className="text-[10px] sm:text-[11px] font-semibold flex items-center gap-1">
-                        <FontAwesomeIcon icon={countdown.isExpired ? faExclamationTriangle : faHourglassHalf} />
-                        <span>Sisa Waktu:</span>
-                      </span>
-
-                      {countdown.isExpired ? (
-                        <span className="font-extrabold text-[11px] uppercase tracking-wider text-rose-300">TERLEWATI</span>
-                      ) : (
-                        <div className="font-mono font-bold text-[11px] flex gap-1">
-                          {countdown.days > 0 && <span>{countdown.days}h</span>}
-                          <span>{String(countdown.hours).padStart(2, '0')}j</span>
-                          <span>{String(countdown.minutes).padStart(2, '0')}m</span>
-                          <span className="w-5 text-right">{String(countdown.seconds).padStart(2, '0')}d</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="col-span-full text-center py-10 text-slate-400 italic text-xs sm:text-sm border border-dashed border-white/10 rounded-2xl">
-              Belum ada tugas atau deadline yang aktif saat ini.
-            </div>
-          )}
         </div>
       </div>
 
