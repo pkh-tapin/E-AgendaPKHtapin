@@ -22,7 +22,9 @@ import {
   faShieldAlt,
   faSave,
   faBullhorn,
-  faStickyNote
+  faStickyNote,
+  faExclamationCircle,
+  faCheckCircle
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function Dashboard({ 
@@ -146,7 +148,6 @@ export default function Dashboard({
   // GROUPING LOGIC: DEADLINE & AGENDA DALAM SATU CARD (BY DATE)
   // -------------------------------------------------------------
   const combinedItems = [];
-  const todayDateString = `${currentYear}-${String(currentDayNum).padStart(2,'0')}-${String(dateObj.getMonth()+1).padStart(2,'0')}`; // YYYY-DD-MM bug fix -> YYYY-MM-DD format:
   const todayStr = `${currentYear}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(currentDayNum).padStart(2,'0')}`;
 
   // 1. Ekstrak Data Tugas
@@ -195,14 +196,14 @@ export default function Dashboard({
     const diff = targetTime - nowTimestamp;
 
     if (isNaN(targetTime)) {
-      return { isExpired: true, badgeClass: 'bg-slate-800 border-slate-700' };
+      return { isExpired: true, badgeClass: 'bg-slate-900 border-slate-700 text-slate-400' };
     }
 
     if (diff <= 0) {
       return {
         isExpired: true,
         days: 0, hours: 0, minutes: 0, seconds: 0,
-        badgeClass: 'bg-rose-950/90 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.5)]'
+        badgeClass: 'bg-rose-950/80 border-rose-500 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.3)]'
       };
     }
 
@@ -211,9 +212,11 @@ export default function Dashboard({
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
-    let badgeClass = 'bg-slate-900/90 border-slate-600 shadow-[0_0_15px_rgba(0,0,0,0.5)] text-slate-200';
+    let badgeClass = 'bg-slate-900 border-slate-700 shadow-lg text-slate-200';
     if (days === 0 && hours < 24) {
-      badgeClass = 'bg-rose-950/80 border-rose-500 text-rose-200 shadow-[0_0_25px_rgba(244,63,94,0.4)]';
+      badgeClass = 'bg-rose-950/40 border-rose-500/50 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.3)]';
+    } else if (days <= 2) {
+      badgeClass = 'bg-amber-950/40 border-amber-500/50 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.2)]';
     }
 
     return {
@@ -402,44 +405,55 @@ export default function Dashboard({
       {/* SECTION UTAMA: JADWAL & DEADLINE TERPADU (GROUPED BY DATE) */}
       {/* ------------------------------------------------------------- */}
       <div className="space-y-5 sm:space-y-6 relative mt-10">
+        {/* Glow Background Header */}
         <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-cyan-500/10 rounded-3xl blur-xl pointer-events-none"></div>
-        <div className="flex items-center gap-3 text-white relative z-10 px-2 border-b border-white/10 pb-4">
-          <FontAwesomeIcon icon={faTasks} className="text-2xl sm:text-3xl text-rose-400 drop-shadow-[0_0_15px_rgba(244,63,94,0.6)]" />
-          <h2 className="text-xl sm:text-3xl font-black tracking-wide drop-shadow-lg uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">
-            Jadwal Kegiatan & Deadline Tugas Terpadu
-          </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white relative z-10 px-2 border-b border-white/10 pb-4">
+          <div className="flex items-center gap-3">
+            <FontAwesomeIcon icon={faTasks} className="text-2xl sm:text-3xl text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.6)]" />
+            <h2 className="text-xl sm:text-3xl font-black tracking-wide drop-shadow-lg uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">
+              Jadwal Kegiatan & Deadline Tugas
+            </h2>
+          </div>
+          <span className="text-xs font-bold text-slate-400 bg-slate-900/50 px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 w-fit">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+            </span>
+            Live Monitoring
+          </span>
         </div>
 
         <div className="space-y-8 relative z-10">
           {sortedDates.length > 0 ? (
             sortedDates.map(dateStr => {
               const items = groupedItems[dateStr];
-              return (
-                <div key={dateStr} className="p-1 rounded-3xl bg-gradient-to-br from-slate-800/90 to-slate-900/95 border border-slate-600/50 shadow-2xl overflow-hidden transition-all duration-300 relative group/card hover:border-slate-500">
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
+              
+              // Animasi Ringan untuk Hari Ini
+              const isToday = dateStr === todayStr;
 
-                  <div className="p-4 sm:p-6 bg-slate-950/60 rounded-[22px] backdrop-blur-md">
+              return (
+                <div key={dateStr} className={`p-1 rounded-[28px] bg-gradient-to-br from-slate-800/90 to-slate-900/95 shadow-2xl overflow-hidden transition-all duration-300 relative group/card border ${isToday ? 'border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-slate-600/40 hover:border-slate-500/80'}`}>
+                  
+                  {isToday && <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse-slow"></div>}
+
+                  <div className="p-4 sm:p-6 bg-slate-950/70 rounded-[24px] backdrop-blur-xl">
                     {/* --- HEADER TANGGAL CARD --- */}
-                    <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-700/60">
-                      <div className="bg-indigo-500/20 w-14 h-14 rounded-2xl flex items-center justify-center text-indigo-400 shadow-inner border border-indigo-500/30">
-                        <FontAwesomeIcon icon={faCalendarCheck} className="text-3xl" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl sm:text-2xl font-black text-white tracking-wide uppercase drop-shadow-md">
-                          {formatIndoDate(dateStr)}
-                        </h3>
-                        <div className="flex items-center gap-3 mt-1.5 text-xs font-bold">
-                          <span className="text-rose-400 bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-500/20">
-                            {items.filter(i => i.itemType === 'task').length} Tugas
-                          </span>
-                          <span className="text-cyan-400 bg-cyan-950/50 px-2 py-0.5 rounded-md border border-cyan-500/20">
-                            {items.filter(i => i.itemType === 'agenda').length} Agenda
-                          </span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-700/60">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner border ${isToday ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-slate-800 text-slate-400 border-slate-600'}`}>
+                          <FontAwesomeIcon icon={faCalendarAlt} className="text-2xl sm:text-3xl" />
+                        </div>
+                        <div>
+                          <h3 className={`text-lg sm:text-2xl font-black uppercase tracking-wide drop-shadow-md ${isToday ? 'text-indigo-200' : 'text-slate-100'}`}>
+                            {formatIndoDate(dateStr)}
+                            {isToday && <span className="ml-2 text-[10px] sm:text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-widest align-middle">Hari Ini</span>}
+                          </h3>
+                          <p className="text-xs text-slate-400 font-medium mt-1">Total {items.length} aktivitas terdaftar pada tanggal ini.</p>
                         </div>
                       </div>
                     </div>
 
-                    {/* --- ISI LIST CARD --- */}
+                    {/* --- ISI LIST KARTU --- */}
                     <div className="space-y-4 sm:space-y-5">
                       {items.map((item, idx) => {
                         
@@ -449,45 +463,79 @@ export default function Dashboard({
                           // ==========================================
                           const countdown = getCountdown(item.timestamp);
                           return (
-                            <div key={idx} className="flex flex-col md:flex-row gap-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-950/40 to-slate-900/70 border-l-[6px] border-l-rose-500 border border-rose-500/20 hover:from-rose-900/50 transition-all duration-300 shadow-lg relative overflow-hidden">
-                              <div className="absolute top-0 right-0 w-40 h-40 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                            <div key={idx} className="flex flex-col md:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-950/30 to-slate-900/60 border-l-[8px] border-l-rose-500 border-y border-r border-rose-500/20 hover:from-rose-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch">
+                              
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-                              <div className="flex-1 space-y-2.5 z-10">
-                                <span className="inline-flex items-center justify-center px-3 py-1 bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest rounded uppercase border border-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.3)]">
-                                  🔴 DEADLINE TUGAS
-                                </span>
-                                <h4 className="text-lg sm:text-xl font-black text-white uppercase tracking-wide leading-snug drop-shadow-sm">
-                                  {item.title}
-                                </h4>
-                                <div className="flex flex-wrap gap-3 text-xs pt-1">
+                              {/* Kiri: Info Judul & Label */}
+                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.3)]">
+                                      <FontAwesomeIcon icon={faExclamationCircle} className="mr-1.5" /> DEADLINE TUGAS
+                                    </span>
+                                  </div>
+                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-rose-100 to-rose-300 uppercase tracking-wide leading-snug drop-shadow-md">
+                                    {item.title}
+                                  </h4>
+                                </div>
+                                
+                                <div className="flex flex-wrap gap-2.5 text-xs">
                                   <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
                                     <FontAwesomeIcon icon={faUser} className="text-slate-400"/>
                                     {getTargetText(item)}
                                   </span>
+                                  <span className="text-rose-200 font-bold bg-rose-950/60 px-3 py-1.5 rounded-lg border border-rose-500/30 shadow-sm flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faClock} className="text-rose-400"/>
+                                    Batas: {item.sortTime} WITA
+                                  </span>
                                 </div>
                               </div>
 
-                              <div className="md:w-auto w-full flex items-center justify-start md:justify-end z-10 shrink-0">
-                                 <div className={`p-4 sm:p-5 rounded-2xl border-[3px] flex flex-col items-center justify-center min-w-[190px] shadow-2xl backdrop-blur-md ${countdown.badgeClass}`}>
-                                   <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase flex items-center gap-2 mb-1.5 opacity-90 text-white">
-                                     <FontAwesomeIcon icon={countdown.isExpired ? faExclamationTriangle : faHourglassHalf} className={countdown.isExpired ? 'animate-bounce text-rose-400 text-sm' : 'animate-spin-slow text-amber-400 text-sm'} />
-                                     <span>Batas Akhir Waktu</span>
-                                   </span>
+                              {/* Kanan: Panel Countdown Digital yang Rapih */}
+                              <div className="md:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-5">
+                                 
+                                 <div className="flex items-center gap-2 mb-2">
+                                    <div className="relative flex h-2.5 w-2.5">
+                                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${countdown.isExpired ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
+                                      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${countdown.isExpired ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
+                                    </div>
+                                    <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300">
+                                      {countdown.isExpired ? 'STATUS: TERLEWATI' : 'SISA WAKTU DEADLINE'}
+                                    </span>
+                                 </div>
+
+                                 <div className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center justify-center w-full min-w-[200px] shadow-inner backdrop-blur-md ${countdown.badgeClass}`}>
                                    {countdown.isExpired ? (
-                                     <span className="font-black text-xl sm:text-2xl uppercase tracking-widest text-rose-400 animate-pulse drop-shadow-[0_0_15px_rgba(244,63,94,1)]">TERLEWATI</span>
+                                     <div className="flex items-center gap-2 animate-pulse text-rose-400">
+                                        <FontAwesomeIcon icon={faTimes} className="text-xl" />
+                                        <span className="font-black text-lg sm:text-xl uppercase tracking-widest">WAKTU HABIS</span>
+                                     </div>
                                    ) : (
-                                     <div className="font-mono font-black text-2xl sm:text-3xl flex items-baseline gap-1.5 drop-shadow-lg text-white">
-                                       {countdown.days > 0 && <span className="text-rose-300">{countdown.days}<span className="text-xs ml-1 font-bold text-slate-300">H</span></span>}
-                                       <span className="text-amber-300">{String(countdown.hours).padStart(2, '0')}<span className="text-xs ml-1 font-bold text-slate-300">J</span></span>
-                                       <span className="text-emerald-300">{String(countdown.minutes).padStart(2, '0')}<span className="text-xs ml-1 font-bold text-slate-300">M</span></span>
-                                       <span className="text-cyan-300 animate-pulse">{String(countdown.seconds).padStart(2, '0')}<span className="text-xs ml-1 font-bold text-slate-300">D</span></span>
+                                     <div className="flex gap-2 text-white">
+                                       {countdown.days > 0 && (
+                                          <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                            <span className="text-rose-300 font-mono font-black text-lg sm:text-2xl leading-none">{countdown.days}</span>
+                                            <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Hari</span>
+                                          </div>
+                                       )}
+                                       <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                         <span className="text-amber-300 font-mono font-black text-lg sm:text-2xl leading-none">{String(countdown.hours).padStart(2, '0')}</span>
+                                         <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Jam</span>
+                                       </div>
+                                       <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                         <span className="text-emerald-300 font-mono font-black text-lg sm:text-2xl leading-none">{String(countdown.minutes).padStart(2, '0')}</span>
+                                         <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Mnt</span>
+                                       </div>
+                                       <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                         <span className="text-cyan-300 font-mono font-black text-lg sm:text-2xl leading-none animate-pulse">{String(countdown.seconds).padStart(2, '0')}</span>
+                                         <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Dtk</span>
+                                       </div>
                                      </div>
                                    )}
-                                   <div className="mt-2 text-[10px] font-bold text-slate-400 tracking-wider">
-                                     Jam: <span className="text-rose-300">{item.sortTime} WITA</span>
-                                   </div>
                                  </div>
                               </div>
+
                             </div>
                           )
                         } else {
@@ -495,17 +543,24 @@ export default function Dashboard({
                           // UI AGENDA / KEGIATAN (BIRU - CYAN)
                           // ==========================================
                           return (
-                            <div key={idx} className="flex flex-col md:flex-row gap-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/40 to-slate-900/70 border-l-[6px] border-l-cyan-500 border border-cyan-500/20 hover:from-cyan-900/50 transition-all duration-300 shadow-lg relative overflow-hidden">
-                              <div className="absolute top-0 right-0 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                            <div key={idx} className="flex flex-col md:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/30 to-slate-900/60 border-l-[8px] border-l-cyan-500 border-y border-r border-cyan-500/20 hover:from-cyan-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch">
+                              
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-                              <div className="flex-1 space-y-2.5 z-10">
-                                <span className="inline-flex items-center justify-center px-3 py-1 bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest rounded uppercase border border-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.3)]">
-                                  🔵 AGENDA KEGIATAN
-                                </span>
-                                <h4 className="text-lg sm:text-xl font-black text-white uppercase tracking-wide leading-snug drop-shadow-sm">
-                                  {item.title}
-                                </h4>
-                                <div className="flex flex-wrap gap-3 text-xs pt-1">
+                              {/* Kiri: Info Judul & Label */}
+                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.3)]">
+                                      <FontAwesomeIcon icon={faCheckCircle} className="mr-1.5" /> AGENDA KEGIATAN
+                                    </span>
+                                  </div>
+                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-100 to-cyan-300 uppercase tracking-wide leading-snug drop-shadow-md">
+                                    {item.title}
+                                  </h4>
+                                </div>
+                                
+                                <div className="flex flex-wrap gap-2.5 text-xs">
                                   <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
                                     <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400"/>
                                     Desa {item.desa}, Kec. {item.kecamatan}
@@ -519,21 +574,25 @@ export default function Dashboard({
                                 </div>
                               </div>
 
-                              <div className="md:w-auto w-full flex items-center justify-start md:justify-end z-10 shrink-0">
-                                 <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border-[3px] border-cyan-500/40 text-cyan-300 flex flex-col items-center justify-center min-w-[190px] shadow-[0_0_20px_rgba(6,182,212,0.15)] backdrop-blur-md">
-                                    <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase flex items-center gap-2 mb-2 opacity-90 text-white">
-                                      <FontAwesomeIcon icon={faCalendarCheck} className="text-cyan-400 text-sm" />
-                                      <span>Jadwal Pelaksanaan</span>
+                              {/* Kanan: Label Jam Rapi */}
+                              <div className="md:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-5">
+                                 <div className="flex items-center gap-2 mb-2">
+                                    <FontAwesomeIcon icon={faCalendarCheck} className="text-cyan-400 text-sm" />
+                                    <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300">
+                                      JADWAL PELAKSANAAN
                                     </span>
-                                    <div className="font-mono font-black text-2xl sm:text-3xl flex items-center gap-2.5 drop-shadow-lg text-white">
+                                 </div>
+                                 <div className="bg-slate-900/90 border-2 border-cyan-500/40 px-5 sm:px-6 py-3 rounded-xl flex flex-col items-center justify-center w-full min-w-[200px] shadow-[0_0_15px_rgba(6,182,212,0.15)] backdrop-blur-md">
+                                    <div className="font-mono font-black text-2xl sm:text-3xl flex items-center gap-2 text-white">
                                       <FontAwesomeIcon icon={faClock} className="animate-pulse text-cyan-400 text-xl" />
                                       <span>{item.sortTime}</span>
                                     </div>
-                                    <div className="mt-1 text-[11px] font-bold text-cyan-400 tracking-widest">
+                                    <div className="mt-1 text-[11px] font-bold text-cyan-400 tracking-widest bg-cyan-950/50 px-3 py-0.5 rounded-full">
                                       WITA
                                     </div>
                                  </div>
                               </div>
+
                             </div>
                           )
                         }
