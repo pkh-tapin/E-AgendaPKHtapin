@@ -49,7 +49,6 @@ export default function Dashboard({
   const [infoList, setInfoList] = useState([]);
   const [notesList, setNotesList] = useState([]);
 
-  // Listener Realtime Pengumuman / Info
   useEffect(() => {
     const infoRef = ref(db, 'infoList');
     const unsubscribe = onValue(infoRef, (snapshot) => {
@@ -64,7 +63,6 @@ export default function Dashboard({
     return () => unsubscribe();
   }, []);
 
-  // Listener Realtime Catatan SDM
   useEffect(() => {
     const notesRef = ref(db, 'dashboardNotes');
     const unsubscribe = onValue(notesRef, (snapshot) => {
@@ -85,19 +83,26 @@ export default function Dashboard({
     return id;
   };
 
+  const getTargetText = (task) => {
+    if (task.targetType === 'all') return 'Seluruh SDM';
+    if (task.targetType === 'specific') return `${getStaffName(task.assignee)}`;
+    if (task.targetType === 'kecamatan') return `Kec. ${task.kecamatan || '-'}`;
+    return 'SDM Terkait';
+  };
+
   // -------------------------------------------------------------
-  // REAL-TIME CLOCK ENGINE & TANGGAL dddd, dd mmmm yyyy
+  // REAL-TIME CLOCK ENGINE & TANGGAL
   // -------------------------------------------------------------
-  const [now, setNow] = useState(Date.now());
+  const [nowTimestamp, setNowTimestamp] = useState(Date.now());
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setNow(Date.now());
+      setNowTimestamp(Date.now());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const dateObj = new Date(now);
+  const dateObj = new Date(nowTimestamp);
   const namaHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const namaBulan = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -108,55 +113,96 @@ export default function Dashboard({
   const currentDayNum = dateObj.getDate();
   const currentMonthName = namaBulan[dateObj.getMonth()];
   const currentYear = dateObj.getFullYear();
-
   const fullFormattedDate = `${currentDayName}, ${currentDayNum} ${currentMonthName} ${currentYear}`;
 
   const hoursStr = String(dateObj.getHours()).padStart(2, '0');
   const minutesStr = String(dateObj.getMinutes()).padStart(2, '0');
   const secondsStr = String(dateObj.getSeconds()).padStart(2, '0');
 
-  // -------------------------------------------------------------
-  // LOGIKA AGENDA 3 HARI KERJA KE DEPAN (SENIN - JUMAT)
-  // -------------------------------------------------------------
-  const getNext3WorkingDays = (startDate) => {
-    const dates = [];
-    let curr = new Date(startDate);
-    while (dates.length < 3) {
-      curr.setDate(curr.getDate() + 1);
-      const day = curr.getDay();
-      if (day !== 0 && day !== 6) { // Lewati Sabtu & Minggu
-        const yr = curr.getFullYear();
-        const mo = String(curr.getMonth() + 1).padStart(2, '0');
-        const da = String(curr.getDate()).padStart(2, '0');
-        dates.push(`${yr}-${mo}-${da}`);
-      }
-    }
-    return dates;
+  // Format Standar Hari dan Tanggal
+  const formatIndoDate = (dateStr) => {
+    if (!dateStr) return '-';
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (isNaN(d.getTime())) return dateStr;
+    return `${namaHari[d.getDay()]}, ${d.getDate()} ${namaBulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  const next3WorkingDates = getNext3WorkingDays(now);
+  // Helper Sinkronisasi Zona Waktu Lokal
+  const getLocalFormat = (input) => {
+    if (!input) return { dateStr: '', timeStr: '23:59' };
+    if (!input.includes('T')) return { dateStr: input, timeStr: '23:59' };
+    
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return { dateStr: input.split('T')[0], timeStr: '23:59' };
+    
+    const pad = (n) => String(n).padStart(2, '0');
+    return {
+      dateStr: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      timeStr: `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    };
+  };
 
-  const upcoming3DaysAgendaList = agendas.filter((ag) => {
-    if (!ag.date) return false;
-    const cleanDate = ag.date.includes('T') ? ag.date.split('T')[0] : ag.date;
-    return next3WorkingDates.includes(cleanDate);
+  // -------------------------------------------------------------
+  // GROUPING LOGIC: DEADLINE & AGENDA DALAM SATU CARD (BY DATE)
+  // -------------------------------------------------------------
+  const combinedItems = [];
+  const todayDateString = `${currentYear}-${String(currentDayNum).padStart(2,'0')}-${String(dateObj.getMonth()+1).padStart(2,'0')}`; // YYYY-DD-MM bug fix -> YYYY-MM-DD format:
+  const todayStr = `${currentYear}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(currentDayNum).padStart(2,'0')}`;
+
+  // 1. Ekstrak Data Tugas
+  tasks.forEach(task => {
+    const rawDate = task.dueDateTime || task.deadline || task.dueDate || '';
+    const { dateStr, timeStr } = getLocalFormat(rawDate);
+    combinedItems.push({
+      ...task,
+      itemType: 'task',
+      sortDate: dateStr,
+      sortTime: timeStr,
+      timestamp: new Date(`${dateStr}T${timeStr.length === 5 ? timeStr + ':00' : timeStr}`).getTime()
+    });
   });
 
-  // Calculation Countdown Tugas & Deadline
-  const getCountdown = (targetDateInput) => {
-    const targetTime = new Date(targetDateInput).getTime();
-    const diff = targetTime - now;
+  // 2. Ekstrak Data Agenda (Hanya Hari Ini & Mendatang)
+  agendas.forEach(ag => {
+    const rawDate = ag.date || '';
+    const { dateStr, timeStr } = getLocalFormat(rawDate);
+    if (dateStr >= todayStr) {
+      const fixedTime = ag.time || timeStr;
+      combinedItems.push({
+        ...ag,
+        itemType: 'agenda',
+        sortDate: dateStr,
+        sortTime: fixedTime,
+        timestamp: new Date(`${dateStr}T${fixedTime.length === 5 ? fixedTime + ':00' : fixedTime}`).getTime()
+      });
+    }
+  });
+
+  // Sort berdasarkan jam
+  combinedItems.sort((a, b) => a.timestamp - b.timestamp);
+
+  // Group berdasarkan Tanggal
+  const groupedItems = {};
+  combinedItems.forEach(item => {
+    if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
+    groupedItems[item.sortDate].push(item);
+  });
+  
+  const sortedDates = Object.keys(groupedItems).sort((a,b) => new Date(a) - new Date(b));
+
+  // Calculation Countdown Engine Terpusat
+  const getCountdown = (targetTime) => {
+    const diff = targetTime - nowTimestamp;
 
     if (isNaN(targetTime)) {
-      return { isExpired: true, text: 'Format Tanggal Salah', badgeClass: 'bg-slate-800 text-slate-300 border-slate-700' };
+      return { isExpired: true, badgeClass: 'bg-slate-800 border-slate-700' };
     }
 
     if (diff <= 0) {
       return {
         isExpired: true,
-        text: 'TERLEWATI',
         days: 0, hours: 0, minutes: 0, seconds: 0,
-        badgeClass: 'bg-rose-950 text-rose-300 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.5)]'
+        badgeClass: 'bg-rose-950/90 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.5)]'
       };
     }
 
@@ -165,9 +211,9 @@ export default function Dashboard({
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
-    let badgeClass = 'bg-indigo-950/80 text-indigo-300 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]';
+    let badgeClass = 'bg-slate-900/90 border-slate-600 shadow-[0_0_15px_rgba(0,0,0,0.5)] text-slate-200';
     if (days === 0 && hours < 24) {
-      badgeClass = 'bg-rose-950/80 text-rose-300 border-rose-500/50 animate-pulse shadow-[0_0_25px_rgba(244,63,94,0.4)]';
+      badgeClass = 'bg-rose-950/80 border-rose-500 text-rose-200 shadow-[0_0_25px_rgba(244,63,94,0.4)]';
     }
 
     return {
@@ -177,20 +223,34 @@ export default function Dashboard({
     };
   };
 
-  const formatDateTime = (dateInput) => {
-    const d = new Date(dateInput);
-    if (isNaN(d.getTime())) return '-';
-    return d.toLocaleString('id-ID', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  // -------------------------------------------------------------
+  // AGENDA 3 HARI KERJA (Untuk Card Status Minimalis)
+  // -------------------------------------------------------------
+  const getNext3WorkingDays = (startDate) => {
+    const dates = [];
+    let curr = new Date(startDate);
+    while (dates.length < 3) {
+      curr.setDate(curr.getDate() + 1);
+      const day = curr.getDay();
+      if (day !== 0 && day !== 6) { 
+        const yr = curr.getFullYear();
+        const mo = String(curr.getMonth() + 1).padStart(2, '0');
+        const da = String(curr.getDate()).padStart(2, '0');
+        dates.push(`${yr}-${mo}-${da}`);
+      }
+    }
+    return dates;
   };
 
+  const next3WorkingDates = getNext3WorkingDays(nowTimestamp);
+  const upcoming3DaysAgendaList = agendas.filter((ag) => {
+    if (!ag.date) return false;
+    const cleanDate = ag.date.includes('T') ? ag.date.split('T')[0] : ag.date;
+    return next3WorkingDates.includes(cleanDate);
+  });
+
   // -------------------------------------------------------------
-  // HAPUS DIRECT DARI DASHBOARD (KHUSUS ADMIN)
+  // HANDLERS HAPUS / EDIT LOG & PENGUMUMAN
   // -------------------------------------------------------------
   const handleDeleteInfo = async (infoId) => {
     if (!isAdmin) return showToast?.('Akses khusus Admin!', 'error');
@@ -216,9 +276,6 @@ export default function Dashboard({
     }
   };
 
-  // -------------------------------------------------------------
-  // FITUR CRUD ADMIN LENGKAP PADA LOG SWAP
-  // -------------------------------------------------------------
   const handleDeleteSingleLog = async (logId) => {
     if (!isAdmin) return showToast?.('Akses terbatas khusus Admin!', 'error');
     if (window.confirm('Apakah Anda yakin ingin menghapus riwayat pertukaran ini?')) {
@@ -252,7 +309,6 @@ export default function Dashboard({
   const handleSaveEditedLog = async (e) => {
     e.preventDefault();
     if (!editingLog || !editingLog.id) return;
-
     try {
       await update(ref(db, `swaps/${editingLog.id}`), {
         staffA: editingLog.staffA,
@@ -260,7 +316,6 @@ export default function Dashboard({
         staffB: editingLog.staffB,
         dayNumberB: Number(editingLog.dayNumberB)
       });
-
       showToast?.('Riwayat log berhasil diperbarui!', 'success');
       setEditLogModalOpen(false);
       setEditingLog(null);
@@ -282,10 +337,12 @@ export default function Dashboard({
   const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full">
-      {/* Banner Header + Widget Jam Digital 3D Modern Mobile-First */}
+    <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10">
+      
+      {/* ------------------------------------------------------------- */}
+      {/* HEADER WIDGET JAM DIGITAL 3D */}
+      {/* ------------------------------------------------------------- */}
       <div className="p-4 sm:p-8 rounded-3xl bg-gradient-to-r from-indigo-950/90 via-slate-900/95 to-purple-950/90 border border-indigo-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden transition-all duration-300 hover:border-indigo-400/60">
-        
         <div className="absolute -top-12 -left-12 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -304,11 +361,10 @@ export default function Dashboard({
             <span>Sistem Informasi SDM PKH Tapin</span>
           </h1>
           <p className="text-xs sm:text-sm text-indigo-200/80 leading-tight">
-            Monitoring Piket, Agenda, & Deadline Tugas Realtime
+            Monitoring Piket, Agenda, & Deadline Tugas Terpadu
           </p>
         </div>
 
-        {/* WIDGET KALENDER & JAM DIGITAL 3D REAL-TIME RESPONSIVE */}
         <div className="z-10 flex items-center gap-3 flex-wrap w-full md:w-auto">
           <div className="p-3.5 sm:p-5 rounded-2xl bg-slate-950/80 border border-indigo-500/40 backdrop-blur-2xl shadow-[0_10px_30px_rgba(99,102,241,0.25)] flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 hover:border-cyan-400/60 transition-all duration-300 w-full sm:w-auto">
             <div className="flex flex-col items-start justify-center px-3 py-1.5 bg-indigo-600/20 rounded-xl border border-indigo-400/30 w-full sm:w-auto">
@@ -342,92 +398,166 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* POSISI 1: COUNTDOWNS DEADLINE TUGAS AKTIF - PINDAH KE ATAS AGAR JADI PERHATIAN UTAMA */}
-      <div className="space-y-4 sm:space-y-6 animate-pulse-slow relative">
-        <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-purple-500/10 rounded-3xl blur-lg pointer-events-none"></div>
-        <div className="flex items-center gap-2.5 text-rose-400 relative z-10 px-2">
-          <FontAwesomeIcon icon={faTasks} className="text-xl sm:text-2xl" />
-          <h2 className="text-lg sm:text-2xl font-bold text-white tracking-wide drop-shadow-[0_0_10px_rgba(244,63,94,0.5)]">
-            DEADLINE TUGAS (SEGERA DITINDAKLANJUTI)
+      {/* ------------------------------------------------------------- */}
+      {/* SECTION UTAMA: JADWAL & DEADLINE TERPADU (GROUPED BY DATE) */}
+      {/* ------------------------------------------------------------- */}
+      <div className="space-y-5 sm:space-y-6 relative mt-10">
+        <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-cyan-500/10 rounded-3xl blur-xl pointer-events-none"></div>
+        <div className="flex items-center gap-3 text-white relative z-10 px-2 border-b border-white/10 pb-4">
+          <FontAwesomeIcon icon={faTasks} className="text-2xl sm:text-3xl text-rose-400 drop-shadow-[0_0_15px_rgba(244,63,94,0.6)]" />
+          <h2 className="text-xl sm:text-3xl font-black tracking-wide drop-shadow-lg uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">
+            Jadwal Kegiatan & Deadline Tugas Terpadu
           </h2>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6 relative z-10">
-          {tasks.length > 0 ? (
-            tasks.map((task) => {
-              const countdown = getCountdown(task.dueDateTime || task.deadline || task.dueDate);
 
+        <div className="space-y-8 relative z-10">
+          {sortedDates.length > 0 ? (
+            sortedDates.map(dateStr => {
+              const items = groupedItems[dateStr];
               return (
-                <div 
-                  key={task.id} 
-                  className="p-5 sm:p-6 rounded-3xl bg-slate-900/80 border-2 border-indigo-500/30 backdrop-blur-xl shadow-2xl flex flex-col justify-between hover:border-rose-400/60 transition-all duration-300 group overflow-hidden relative"
-                >
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-rose-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                  
-                  <div className="space-y-3">
-                    <h4 className="font-black text-white text-base sm:text-lg leading-snug group-hover:text-rose-200 transition-colors break-words">
-                      {task.title}
-                    </h4>
+                <div key={dateStr} className="p-1 rounded-3xl bg-gradient-to-br from-slate-800/90 to-slate-900/95 border border-slate-600/50 shadow-2xl overflow-hidden transition-all duration-300 relative group/card hover:border-slate-500">
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
 
-                    <div className="flex flex-wrap gap-2">
-                      {task.targetType === 'all' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-[11px] font-bold">
-                          <FontAwesomeIcon icon={faGlobe} /> Seluruh SDM
-                        </span>
-                      )}
-                      {task.targetType === 'specific' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] font-bold">
-                          <FontAwesomeIcon icon={faUser} /> {getStaffName(task.assignee)}
-                        </span>
-                      )}
-                      {task.targetType === 'kecamatan' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 text-[11px] font-bold">
-                          <FontAwesomeIcon icon={faMapMarkerAlt} /> Kec. {task.kecamatan || '-'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-4 mt-4 border-t border-white/10 space-y-3">
-                    <div className="flex justify-between items-center text-xs text-slate-300">
-                      <span className="flex items-center gap-1.5 font-bold">
-                        <FontAwesomeIcon icon={faCalendarAlt} className="text-indigo-400" />
-                        <span>{formatDateTime(task.dueDateTime || task.deadline || task.dueDate)}</span>
-                      </span>
-                    </div>
-
-                    <div className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row items-center justify-center sm:justify-between gap-2 sm:gap-4 ${countdown.badgeClass}`}>
-                      <span className="text-xs sm:text-sm font-black tracking-wider uppercase flex items-center gap-2">
-                        <FontAwesomeIcon icon={countdown.isExpired ? faExclamationTriangle : faHourglassHalf} className={countdown.isExpired ? 'text-2xl' : 'animate-spin-slow'} />
-                        <span>Sisa Waktu:</span>
-                      </span>
-
-                      {countdown.isExpired ? (
-                        <span className="font-black text-lg sm:text-xl uppercase tracking-widest text-rose-300 animate-pulse drop-shadow-[0_0_10px_rgba(244,63,94,0.8)]">TERLEWATI</span>
-                      ) : (
-                        <div className="font-mono font-black text-xl sm:text-2xl lg:text-3xl flex items-baseline gap-1.5 drop-shadow-md">
-                          {countdown.days > 0 && <span className="text-rose-200">{countdown.days}<span className="text-xs sm:text-sm ml-0.5 font-bold">H</span></span>}
-                          <span className="text-amber-200">{String(countdown.hours).padStart(2, '0')}<span className="text-xs sm:text-sm ml-0.5 font-bold">J</span></span>
-                          <span className="text-emerald-200">{String(countdown.minutes).padStart(2, '0')}<span className="text-xs sm:text-sm ml-0.5 font-bold">M</span></span>
-                          <span className="text-cyan-200 animate-pulse">{String(countdown.seconds).padStart(2, '0')}<span className="text-xs sm:text-sm ml-0.5 font-bold">D</span></span>
+                  <div className="p-4 sm:p-6 bg-slate-950/60 rounded-[22px] backdrop-blur-md">
+                    {/* --- HEADER TANGGAL CARD --- */}
+                    <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-700/60">
+                      <div className="bg-indigo-500/20 w-14 h-14 rounded-2xl flex items-center justify-center text-indigo-400 shadow-inner border border-indigo-500/30">
+                        <FontAwesomeIcon icon={faCalendarCheck} className="text-3xl" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl sm:text-2xl font-black text-white tracking-wide uppercase drop-shadow-md">
+                          {formatIndoDate(dateStr)}
+                        </h3>
+                        <div className="flex items-center gap-3 mt-1.5 text-xs font-bold">
+                          <span className="text-rose-400 bg-rose-950/50 px-2 py-0.5 rounded-md border border-rose-500/20">
+                            {items.filter(i => i.itemType === 'task').length} Tugas
+                          </span>
+                          <span className="text-cyan-400 bg-cyan-950/50 px-2 py-0.5 rounded-md border border-cyan-500/20">
+                            {items.filter(i => i.itemType === 'agenda').length} Agenda
+                          </span>
                         </div>
-                      )}
+                      </div>
+                    </div>
+
+                    {/* --- ISI LIST CARD --- */}
+                    <div className="space-y-4 sm:space-y-5">
+                      {items.map((item, idx) => {
+                        
+                        if (item.itemType === 'task') {
+                          // ==========================================
+                          // UI TUGAS / DEADLINE (MERAH - ROSE)
+                          // ==========================================
+                          const countdown = getCountdown(item.timestamp);
+                          return (
+                            <div key={idx} className="flex flex-col md:flex-row gap-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-950/40 to-slate-900/70 border-l-[6px] border-l-rose-500 border border-rose-500/20 hover:from-rose-900/50 transition-all duration-300 shadow-lg relative overflow-hidden">
+                              <div className="absolute top-0 right-0 w-40 h-40 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                              <div className="flex-1 space-y-2.5 z-10">
+                                <span className="inline-flex items-center justify-center px-3 py-1 bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest rounded uppercase border border-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.3)]">
+                                  🔴 DEADLINE TUGAS
+                                </span>
+                                <h4 className="text-lg sm:text-xl font-black text-white uppercase tracking-wide leading-snug drop-shadow-sm">
+                                  {item.title}
+                                </h4>
+                                <div className="flex flex-wrap gap-3 text-xs pt-1">
+                                  <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faUser} className="text-slate-400"/>
+                                    {getTargetText(item)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="md:w-auto w-full flex items-center justify-start md:justify-end z-10 shrink-0">
+                                 <div className={`p-4 sm:p-5 rounded-2xl border-[3px] flex flex-col items-center justify-center min-w-[190px] shadow-2xl backdrop-blur-md ${countdown.badgeClass}`}>
+                                   <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase flex items-center gap-2 mb-1.5 opacity-90 text-white">
+                                     <FontAwesomeIcon icon={countdown.isExpired ? faExclamationTriangle : faHourglassHalf} className={countdown.isExpired ? 'animate-bounce text-rose-400 text-sm' : 'animate-spin-slow text-amber-400 text-sm'} />
+                                     <span>Batas Akhir Waktu</span>
+                                   </span>
+                                   {countdown.isExpired ? (
+                                     <span className="font-black text-xl sm:text-2xl uppercase tracking-widest text-rose-400 animate-pulse drop-shadow-[0_0_15px_rgba(244,63,94,1)]">TERLEWATI</span>
+                                   ) : (
+                                     <div className="font-mono font-black text-2xl sm:text-3xl flex items-baseline gap-1.5 drop-shadow-lg text-white">
+                                       {countdown.days > 0 && <span className="text-rose-300">{countdown.days}<span className="text-xs ml-1 font-bold text-slate-300">H</span></span>}
+                                       <span className="text-amber-300">{String(countdown.hours).padStart(2, '0')}<span className="text-xs ml-1 font-bold text-slate-300">J</span></span>
+                                       <span className="text-emerald-300">{String(countdown.minutes).padStart(2, '0')}<span className="text-xs ml-1 font-bold text-slate-300">M</span></span>
+                                       <span className="text-cyan-300 animate-pulse">{String(countdown.seconds).padStart(2, '0')}<span className="text-xs ml-1 font-bold text-slate-300">D</span></span>
+                                     </div>
+                                   )}
+                                   <div className="mt-2 text-[10px] font-bold text-slate-400 tracking-wider">
+                                     Jam: <span className="text-rose-300">{item.sortTime} WITA</span>
+                                   </div>
+                                 </div>
+                              </div>
+                            </div>
+                          )
+                        } else {
+                          // ==========================================
+                          // UI AGENDA / KEGIATAN (BIRU - CYAN)
+                          // ==========================================
+                          return (
+                            <div key={idx} className="flex flex-col md:flex-row gap-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/40 to-slate-900/70 border-l-[6px] border-l-cyan-500 border border-cyan-500/20 hover:from-cyan-900/50 transition-all duration-300 shadow-lg relative overflow-hidden">
+                              <div className="absolute top-0 right-0 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                              <div className="flex-1 space-y-2.5 z-10">
+                                <span className="inline-flex items-center justify-center px-3 py-1 bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest rounded uppercase border border-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.3)]">
+                                  🔵 AGENDA KEGIATAN
+                                </span>
+                                <h4 className="text-lg sm:text-xl font-black text-white uppercase tracking-wide leading-snug drop-shadow-sm">
+                                  {item.title}
+                                </h4>
+                                <div className="flex flex-wrap gap-3 text-xs pt-1">
+                                  <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400"/>
+                                    Desa {item.desa}, Kec. {item.kecamatan}
+                                  </span>
+                                  {item.sdmName && (
+                                    <span className="text-emerald-200 font-bold bg-emerald-950/60 px-3 py-1.5 rounded-lg border border-emerald-500/30 shadow-sm flex items-center gap-2">
+                                      <FontAwesomeIcon icon={faUser} className="text-emerald-400"/>
+                                      {item.sdmName}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="md:w-auto w-full flex items-center justify-start md:justify-end z-10 shrink-0">
+                                 <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border-[3px] border-cyan-500/40 text-cyan-300 flex flex-col items-center justify-center min-w-[190px] shadow-[0_0_20px_rgba(6,182,212,0.15)] backdrop-blur-md">
+                                    <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase flex items-center gap-2 mb-2 opacity-90 text-white">
+                                      <FontAwesomeIcon icon={faCalendarCheck} className="text-cyan-400 text-sm" />
+                                      <span>Jadwal Pelaksanaan</span>
+                                    </span>
+                                    <div className="font-mono font-black text-2xl sm:text-3xl flex items-center gap-2.5 drop-shadow-lg text-white">
+                                      <FontAwesomeIcon icon={faClock} className="animate-pulse text-cyan-400 text-xl" />
+                                      <span>{item.sortTime}</span>
+                                    </div>
+                                    <div className="mt-1 text-[11px] font-bold text-cyan-400 tracking-widest">
+                                      WITA
+                                    </div>
+                                 </div>
+                              </div>
+                            </div>
+                          )
+                        }
+                      })}
                     </div>
                   </div>
                 </div>
-              );
+              )
             })
           ) : (
-            <div className="col-span-full text-center py-12 text-slate-400 italic text-sm border-2 border-dashed border-white/10 rounded-3xl bg-slate-900/50">
-              Belum ada tugas atau deadline yang aktif saat ini.
+            <div className="text-center py-16 text-slate-400 italic text-sm border-2 border-dashed border-slate-600/50 rounded-[32px] bg-slate-900/30 shadow-inner">
+              <div className="mb-3">
+                <FontAwesomeIcon icon={faCalendarAlt} className="text-4xl text-slate-600" />
+              </div>
+              Belum ada tugas atau agenda krusial yang aktif saat ini.
             </div>
           )}
         </div>
       </div>
 
+      {/* ------------------------------------------------------------- */}
       {/* DUAL SECTION: PAPAN PENGUMUMAN & PAPAN CATATAN SDM */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 pt-4 border-t border-white/10">
-        {/* PAPAN INFORMASI & PENGUMUMAN */}
+      {/* ------------------------------------------------------------- */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 pt-6 border-t border-white/10 mt-6">
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-amber-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
           <div className="flex justify-between items-center flex-wrap gap-2">
             <div className="flex items-center gap-2 text-amber-400">
@@ -465,7 +595,6 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* PAPAN CATATAN OPERASIONAL SDM */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-indigo-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
           <div className="flex justify-between items-center flex-wrap gap-2">
             <div className="flex items-center gap-2 text-indigo-400">
@@ -504,9 +633,10 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* Grid Status Cards (Piket, Agenda, Laporan Pertukaran) */}
+      {/* ------------------------------------------------------------- */}
+      {/* STATUS CARDS MINIMALIS (PIKET, AGENDA KECIL, & SWAP) */}
+      {/* ------------------------------------------------------------- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-        {/* Card 1: Piket Hari Ini */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-emerald-400/60">
           <div className="flex items-center gap-2.5 mb-3 sm:mb-4 text-emerald-400 shrink-0">
             <FontAwesomeIcon icon={faUserShield} className="text-lg sm:text-xl" />
@@ -528,15 +658,12 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Card 2: Agenda Hari Ini & 3 Hari Kerja Ke Depan */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-cyan-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-cyan-400/60">
           <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0 flex-wrap gap-2">
             <div className="flex items-center gap-2 text-cyan-400">
               <FontAwesomeIcon icon={faCalendarCheck} className="text-base sm:text-lg" />
               <h3 className="font-bold text-sm sm:text-base text-white">Agenda SDM</h3>
             </div>
-
-            {/* TAB TOGGLE: HARI INI vs 3 HARI KERJA KE DEPAN */}
             <div className="flex bg-slate-950 p-1 rounded-xl border border-white/10">
               <button
                 onClick={() => setAgendaTab('today')}
@@ -556,7 +683,6 @@ export default function Dashboard({
               </button>
             </div>
           </div>
-
           <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
             {agendaTab === 'today' ? (
               todayAgenda.length > 0 ? (
@@ -607,7 +733,6 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Card 3: Laporan Pertukaran Piket */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-purple-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-purple-400/60">
           <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
             <div className="flex items-center gap-2.5 text-purple-400">
@@ -621,46 +746,25 @@ export default function Dashboard({
                 title="Hapus Semua Log Pertukaran"
               >
                 <FontAwesomeIcon icon={faTrashAlt} />
-                <span>Hapus Semua</span>
+                <span>Hapus</span>
               </button>
             )}
           </div>
-
           <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
             {validSwapLogs.length > 0 ? (
               validSwapLogs.map((log, idx) => (
                 <div key={log.id || idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 space-y-1 relative group hover:bg-purple-500/10 transition-colors">
                   <div className="font-bold text-purple-300 flex items-center justify-between gap-1 leading-tight">
-                    <span className="truncate flex-1">
-                      {getStaffName(log.staffA)} {log.dayNumberA ? `(Tgl ${log.dayNumberA})` : ''}
-                    </span>
+                    <span className="truncate flex-1">{getStaffName(log.staffA)} {log.dayNumberA ? `(Tgl ${log.dayNumberA})` : ''}</span>
                     <span className="text-amber-400 px-0.5 shrink-0">⇄</span>
-                    <span className="truncate flex-1 text-right">
-                      {getStaffName(log.staffB)} {log.dayNumberB ? `(Tgl ${log.dayNumberB})` : ''}
-                    </span>
+                    <span className="truncate flex-1 text-right">{getStaffName(log.staffB)} {log.dayNumberB ? `(Tgl ${log.dayNumberB})` : ''}</span>
                   </div>
-                  
                   <div className="flex justify-between items-center pt-1">
-                    <p className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold truncate">
-                      ✓ Resmi Bertukar (Disetujui Kedua Pihak)
-                    </p>
-
+                    <p className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold truncate">✓ Resmi Bertukar</p>
                     {isAdmin && (
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={() => handleOpenEditLog(log)}
-                          className="text-slate-400 hover:text-cyan-400 text-xs p-1 transition-colors cursor-pointer"
-                          title="Edit Log Ini"
-                        >
-                          <FontAwesomeIcon icon={faEdit} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSingleLog(log.id)}
-                          className="text-slate-400 hover:text-rose-400 text-xs p-1 transition-colors cursor-pointer"
-                          title="Hapus Log Ini"
-                        >
-                          <FontAwesomeIcon icon={faTrashAlt} />
-                        </button>
+                        <button onClick={() => handleOpenEditLog(log)} className="text-slate-400 hover:text-cyan-400 text-xs p-1 transition-colors cursor-pointer"><FontAwesomeIcon icon={faEdit} /></button>
+                        <button onClick={() => handleDeleteSingleLog(log.id)} className="text-slate-400 hover:text-rose-400 text-xs p-1 transition-colors cursor-pointer"><FontAwesomeIcon icon={faTrashAlt} /></button>
                       </div>
                     )}
                   </div>
@@ -675,133 +779,60 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* MODAL EDIT LOG SWAP (ADMIN KHUSUS) */}
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL COMPONENTS TETAP UTUH */}
+      {/* ------------------------------------------------------------- */}
       {editLogModalOpen && editingLog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-md p-5 sm:p-7 rounded-3xl bg-slate-900 border border-purple-500/50 shadow-2xl relative space-y-4 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button
-              onClick={() => { setEditLogModalOpen(false); setEditingLog(null); }}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"
-            >
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <FontAwesomeIcon icon={faEdit} className="text-purple-400" />
-              <span>Edit Riwayat Pertukaran Piket</span>
-            </h3>
-
+            <button onClick={() => { setEditLogModalOpen(false); setEditingLog(null); }} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"><FontAwesomeIcon icon={faTimes} /></button>
+            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2"><FontAwesomeIcon icon={faEdit} className="text-purple-400" /><span>Edit Riwayat Pertukaran Piket</span></h3>
             <form onSubmit={handleSaveEditedLog} className="space-y-4">
               <div className="p-3 rounded-2xl bg-slate-950 border border-white/10 space-y-3">
                 <span className="text-xs font-bold text-indigo-300 block">Pihak Pertama (SDM A)</span>
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-1">Nama SDM A</label>
-                  <select
-                    value={editingLog.staffA || ''}
-                    onChange={(e) => setEditingLog({ ...editingLog, staffA: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"
-                  >
-                    <option value="">-- Pilih SDM --</option>
-                    {staffList.map((s) => {
-                      const sName = typeof s === 'object' ? s.name || s.NAMA || s.id : s;
-                      const sId = typeof s === 'object' ? s.id || s.name : s;
-                      return <option key={sId} value={sId}>{sName}</option>;
-                    })}
-                  </select>
+                  <select value={editingLog.staffA || ''} onChange={(e) => setEditingLog({ ...editingLog, staffA: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"><option value="">-- Pilih SDM --</option>{staffList.map((s) => { const sId = typeof s === 'object' ? s.id || s.name : s; const sName = typeof s === 'object' ? s.name || s.NAMA || s.id : s; return <option key={sId} value={sId}>{sName}</option>; })}</select>
                 </div>
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-1">Tanggal Piket SDM A</label>
-                  <input
-                    type="number"
-                    value={editingLog.dayNumberA || ''}
-                    onChange={(e) => setEditingLog({ ...editingLog, dayNumberA: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"
-                  />
+                  <input type="number" value={editingLog.dayNumberA || ''} onChange={(e) => setEditingLog({ ...editingLog, dayNumberA: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none" />
                 </div>
               </div>
-
               <div className="p-3 rounded-2xl bg-slate-950 border border-white/10 space-y-3">
                 <span className="text-xs font-bold text-cyan-300 block">Pihak Kedua (SDM B)</span>
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-1">Nama SDM B</label>
-                  <select
-                    value={editingLog.staffB || ''}
-                    onChange={(e) => setEditingLog({ ...editingLog, staffB: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"
-                  >
-                    <option value="">-- Pilih SDM --</option>
-                    {staffList.map((s) => {
-                      const sName = typeof s === 'object' ? s.name || s.NAMA || s.id : s;
-                      const sId = typeof s === 'object' ? s.id || s.name : s;
-                      return <option key={sId} value={sId}>{sName}</option>;
-                    })}
-                  </select>
+                  <select value={editingLog.staffB || ''} onChange={(e) => setEditingLog({ ...editingLog, staffB: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"><option value="">-- Pilih SDM --</option>{staffList.map((s) => { const sId = typeof s === 'object' ? s.id || s.name : s; const sName = typeof s === 'object' ? s.name || s.NAMA || s.id : s; return <option key={sId} value={sId}>{sName}</option>; })}</select>
                 </div>
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-1">Tanggal Piket SDM B</label>
-                  <input
-                    type="number"
-                    value={editingLog.dayNumberB || ''}
-                    onChange={(e) => setEditingLog({ ...editingLog, dayNumberB: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"
-                  />
+                  <input type="number" value={editingLog.dayNumberB || ''} onChange={(e) => setEditingLog({ ...editingLog, dayNumberB: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none" />
                 </div>
               </div>
-
               <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setEditLogModalOpen(false); setEditingLog(null); }}
-                  className="px-4 py-2 rounded-xl bg-white/10 text-white text-xs font-semibold cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FontAwesomeIcon icon={faSave} />
-                  <span>Simpan Perubahan</span>
-                </button>
+                <button type="button" onClick={() => { setEditLogModalOpen(false); setEditingLog(null); }} className="px-4 py-2 rounded-xl bg-white/10 text-white text-xs font-semibold cursor-pointer">Batal</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"><FontAwesomeIcon icon={faSave} /><span>Simpan Perubahan</span></button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modal Catatan Tugas Piket */}
       {isNotesModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-lg p-5 sm:p-8 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-3d-glass relative animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button
-              onClick={() => setIsNotesModalOpen(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"
-            >
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <div className="flex items-center gap-2.5 mb-5 text-amber-400">
-              <FontAwesomeIcon icon={faInfoCircle} className="text-xl sm:text-2xl" />
-              <h3 className="text-base sm:text-xl font-bold text-white">Standar Operasional Tugas Piket</h3>
-            </div>
-
+            <button onClick={() => setIsNotesModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"><FontAwesomeIcon icon={faTimes} /></button>
+            <div className="flex items-center gap-2.5 mb-5 text-amber-400"><FontAwesomeIcon icon={faInfoCircle} className="text-xl sm:text-2xl" /><h3 className="text-base sm:text-xl font-bold text-white">Standar Operasional Tugas Piket</h3></div>
             <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
               {piketNotes.map((note, idx) => (
                 <div key={idx} className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start gap-3 text-xs text-slate-200">
-                  <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center shrink-0">
-                    {idx + 1}
-                  </span>
+                  <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
                   <span className="leading-relaxed">{note}</span>
                 </div>
               ))}
             </div>
-
-            <button
-              onClick={() => setIsNotesModalOpen(false)}
-              className="w-full mt-5 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm shadow-3d-button transition-all cursor-pointer active:scale-95"
-            >
-              Saya Mengerti
-            </button>
+            <button onClick={() => setIsNotesModalOpen(false)} className="w-full mt-5 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm shadow-3d-button transition-all cursor-pointer active:scale-95">Saya Mengerti</button>
           </div>
         </div>
       )}
