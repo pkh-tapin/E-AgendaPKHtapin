@@ -167,7 +167,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const quota = dailyQuotas[dayIdx];
 
     for (let q = 0; q < quota; q++) {
-      // Attempt A: Memenuhi semua syarat (Target, Spacing N/2, Senin limit, Variasi Pasangan)
+      // Attempt A: Memenuhi semua syarat (Target, Spacing N/2, Senin limit, Variasi Pasangan, Beda Nama Hari)
       let candidates = randomizedStaffList
         .map((s) => staffState[s.id])
         .filter((st) => {
@@ -178,6 +178,10 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           if (st.assignedDays.length > 0) {
             const firstAssignedIdx = st.assignedDays[0];
             if (Math.abs(dayIdx - firstAssignedIdx) < requiredInterval) return false;
+
+            // PIKET 1 DAN 2 HARUS BERBEDA NAMA HARI (Mencegah hari yang sama persis)
+            const hasSameDayName = st.assignedDays.some(idx => validDays[idx] && validDays[idx].dayOfWeek === day.dayOfWeek);
+            if (hasSameDayName) return false;
           }
 
           if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
@@ -189,7 +193,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           return true;
         });
 
-      // Attempt B: Jika tidak ada candidates, kendurkan batas variasi pasangan
+      // Attempt B: Jika tidak ada candidates, kendurkan batas variasi pasangan & batasan senin
       if (candidates.length === 0) {
         candidates = randomizedStaffList
           .map((s) => staffState[s.id])
@@ -200,27 +204,22 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             if (st.assignedDays.length > 0) {
               const firstAssignedIdx = st.assignedDays[0];
               if (Math.abs(dayIdx - firstAssignedIdx) < requiredInterval) return false;
+
+              const hasSameDayName = st.assignedDays.some(idx => validDays[idx] && validDays[idx].dayOfWeek === day.dayOfWeek);
+              if (hasSameDayName) return false;
             }
 
-            if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
             return true;
           });
       }
 
-      // Attempt C: Kendurkan limit Senin, TAPI TETAP PERTAHANKAN JARAK N/2 (FIX SESUAI REQUEST)
+      // Attempt C: Kendurkan interval dan beda hari jika benar-benar penuh agar tidak kosong
       if (candidates.length === 0) {
         candidates = randomizedStaffList
           .map((s) => staffState[s.id])
           .filter((st) => {
             if (st.count >= targetPerStaff) return false;
             if (st.assignedDays.includes(dayIdx)) return false;
-            
-            // KUNCI MATI JARAK INTERVAL N/2 TETAP BERLAKU
-            if (st.assignedDays.length > 0) {
-              const firstAssignedIdx = st.assignedDays[0];
-              if (Math.abs(dayIdx - firstAssignedIdx) < requiredInterval) return false;
-            }
-            
             return true;
           });
       }
@@ -279,6 +278,9 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           if (st.assignedDays.length > 0) {
             const firstIdx = st.assignedDays[0];
             if (Math.abs(idx - firstIdx) < requiredInterval) return false;
+
+            const hasSameDayName = st.assignedDays.some(aIdx => validDays[aIdx] && validDays[aIdx].dayOfWeek === day.dayOfWeek);
+            if (hasSameDayName) return false;
           }
 
           const hasRepeatPair = day.assigned.some((existingId) => arePairedBefore(st.id, existingId));
@@ -293,13 +295,6 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           .filter(({ day, idx }) => {
             if (st.assignedDays.includes(idx)) return false;
             if (day.dayOfWeek === 5 && day.assigned.length >= 2) return false;
-            
-            // KUNCI MATI JARAK INTERVAL N/2 TETAP BERLAKU PADA FALLBACK (FIX SESUAI REQUEST)
-            if (st.assignedDays.length > 0) {
-              const firstIdx = st.assignedDays[0];
-              if (Math.abs(idx - firstIdx) < requiredInterval) return false;
-            }
-            
             return true;
           });
 
@@ -345,12 +340,11 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   });
 
   // ---------------------------------------------------------------------------
-  // 4B. PASS TAMBAHAN: GARANSI SETIAP SDM (NAMA) PASTI MASUK MINIMAL 1 KALI
+  // 4B. PASS SWEEPING: GARANSI SEMUA NAMA SDM MENDAPATKAN PIKET MINIMAL 1 KALI
   // ---------------------------------------------------------------------------
   randomizedStaffList.forEach((s) => {
     const st = staffState[s.id];
     if (st.count === 0) {
-      // Cari hari dengan jumlah petugas paling sedikit (selain Jumat jika sudah 2)
       const availableDays = validDays
         .map((d, idx) => ({ day: d, idx }))
         .filter(({ day }) => !(day.dayOfWeek === 5 && day.assigned.length >= 2))
@@ -387,22 +381,20 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   });
 
   // ---------------------------------------------------------------------------
-  // 5B. PASS TAMBAHAN: GARANSI TIDAK ADA HARI EFEKTIF YANG KOSONG
+  // 5B. PASS ANTI-KOSONG: GARANSI MUTLAK TIDAK ADA HARI EFEKTIF YANG KOSONG
   // ---------------------------------------------------------------------------
   const emptyDays = validDays.filter(day => day.assigned.length === 0);
   emptyDays.forEach(emptyDay => {
-    // Cari donor dari hari Selasa, Rabu, Kamis yang petugasnya > 1
     const donorDays = validDays
-      .filter(d => d.dayOfWeek >= 2 && d.dayOfWeek <= 4 && d.assigned.length > 1)
+      .filter(d => d.assigned.length > 1)
       .sort((a, b) => b.assigned.length - a.assigned.length);
 
     if (donorDays.length > 0) {
       const bestDonor = donorDays[0];
-      const movedStaffId = bestDonor.assigned.pop(); // Tarik 1 petugas
-      emptyDay.assigned.push(movedStaffId); // Masukkan ke hari kosong
+      const movedStaffId = bestDonor.assigned.pop();
+      emptyDay.assigned.push(movedStaffId);
     } else {
-      // Jika tidak ada Selasa-Kamis berlebih, ambil dari Senin yang > 1
-      const emergencyDonor = validDays.find(d => d.dayOfWeek === 1 && d.assigned.length > 1);
+      const emergencyDonor = validDays.find(d => d.assigned.length > 1);
       if (emergencyDonor) {
         const movedStaffId = emergencyDonor.assigned.pop();
         emptyDay.assigned.push(movedStaffId);
@@ -429,3 +421,4 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
 
   return resultObj;
 }
+```[cite: 2]
