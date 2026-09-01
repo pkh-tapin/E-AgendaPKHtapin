@@ -9,7 +9,8 @@ import {
   faMapMarkerAlt,
   faClock,
   faCheckCircle,
-  faHourglassHalf
+  faHourglassHalf,
+  faSync
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function RekapKegiatan({ tasks = [], agendas = [], staffList = [] }) {
@@ -19,7 +20,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
   const [selectedYear, setSelectedYear] = useState(String(today.getFullYear()));
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Update waktu setiap menit untuk akurasi countdown
+  // Update waktu setiap menit untuk akurasi countdown & status
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date().getTime()), 60000);
     return () => clearInterval(timer);
@@ -63,6 +64,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
     };
   };
 
+  // Format Tanggal: Hari, DD Bulan YYYY
   const formatIndoDate = (dateStr) => {
     if (!dateStr) return '-';
     const parts = dateStr.split('-');
@@ -113,21 +115,36 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
 
   const filteredActivities = useMemo(() => {
     return allActivities.map(item => {
-      const diff = item.rawTimestamp - currentTime;
-      const isPast = diff < 0;
-      let countdown = '';
+      const timeElapsed = currentTime - item.rawTimestamp; // Selisih waktu sekarang dengan jadwal
+      const fiveHoursMs = 5 * 60 * 60 * 1000; // 5 jam dalam milidetik
+      
+      let statusType = ''; // 'belum', 'proses', 'selesai'
+      let statusText = '';
 
-      if (!isPast) {
+      if (timeElapsed < 0) {
+        // Jika jadwal belum terlewat
+        statusType = 'belum';
+        const diff = Math.abs(timeElapsed);
         const daysLeft = Math.floor(diff / (1000 * 60 * 60 * 24));
         const hoursLeft = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
         const minsLeft = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         
-        if (daysLeft > 0) countdown = `${daysLeft} Hari Lagi`;
-        else if (hoursLeft > 0) countdown = `${hoursLeft} Jam Lagi`;
-        else countdown = `${minsLeft} Menit Lagi`;
+        if (daysLeft > 0) statusText = `${daysLeft} Hari Lagi`;
+        else if (hoursLeft > 0) statusText = `${hoursLeft} Jam Lagi`;
+        else statusText = `${minsLeft} Menit Lagi`;
+      } 
+      else if (timeElapsed >= 0 && timeElapsed <= fiveHoursMs) {
+        // Jika jadwal sudah lewat, tapi masih dalam rentang 5 jam
+        statusType = 'proses';
+        statusText = 'Masih Proses';
+      } 
+      else {
+        // Jika sudah terlewat lebih dari 5 jam
+        statusType = 'selesai';
+        statusText = 'Selesai';
       }
 
-      return { ...item, isPast, countdown };
+      return { ...item, statusType, statusText };
     }).filter(item => {
       if (!item.rawDate) return false;
       const [year, month] = item.rawDate.split('-');
@@ -155,7 +172,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
       const date = `"${item.formattedDate}"`;
       const time = `"${item.time}"`;
       const location = `"${(item.locationOrTarget || '').replace(/"/g, '""')}"`;
-      const status = `"${item.isPast ? 'Selesai' : 'Belum Terlaksana'}"`;
+      const status = `"${item.statusText}"`;
       csvContent += `${index + 1},${title},${type},${date},${time},${location},${status}\n`;
     });
 
@@ -261,7 +278,9 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
                   <tr 
                     key={item.id} 
                     className={`hover:bg-white/5 transition-colors group ${
-                      item.isPast ? 'border-l-4 border-l-rose-500' : 'border-l-4 border-l-emerald-500'
+                      item.statusType === 'selesai' ? 'border-l-4 border-l-rose-500' :
+                      item.statusType === 'proses' ? 'border-l-4 border-l-amber-500' :
+                      'border-l-4 border-l-emerald-500'
                     }`}
                   >
                     <td className="p-4 text-sm font-extrabold text-slate-500 whitespace-nowrap">{index + 1}</td>
@@ -292,15 +311,22 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
                       </div>
                     </td>
                     <td className="p-4 text-sm font-bold whitespace-nowrap tracking-wide">
-                      {item.isPast ? (
+                      {item.statusType === 'selesai' && (
                         <span className="flex items-center gap-2 text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-lg w-max">
                           <FontAwesomeIcon icon={faCheckCircle} />
-                          Sudah Selesai
+                          {item.statusText}
                         </span>
-                      ) : (
+                      )}
+                      {item.statusType === 'proses' && (
+                        <span className="flex items-center gap-2 text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-lg w-max">
+                          <FontAwesomeIcon icon={faSync} className="animate-spin" />
+                          {item.statusText}
+                        </span>
+                      )}
+                      {item.statusType === 'belum' && (
                         <span className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg w-max">
                           <FontAwesomeIcon icon={faHourglassHalf} className="animate-pulse" />
-                          {item.countdown}
+                          {item.statusText}
                         </span>
                       )}
                     </td>
