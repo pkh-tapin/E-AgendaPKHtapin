@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faCalendarAlt, 
@@ -7,15 +7,23 @@ import {
   faSearch,
   faCalendarCheck,
   faMapMarkerAlt,
-  faClock
+  faClock,
+  faCheckCircle,
+  faHourglassHalf
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function RekapKegiatan({ tasks = [], agendas = [], staffList = [] }) {
-  // Setup Waktu Default
+  const [currentTime, setCurrentTime] = useState(new Date().getTime());
   const today = new Date();
   const [selectedMonth, setSelectedMonth] = useState(String(today.getMonth() + 1).padStart(2, '0'));
   const [selectedYear, setSelectedYear] = useState(String(today.getFullYear()));
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Update waktu setiap menit untuk akurasi countdown
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date().getTime()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const months = [
     { value: '01', label: 'Januari' }, { value: '02', label: 'Februari' },
@@ -55,32 +63,48 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
     };
   };
 
+  const formatIndoDate = (dateStr) => {
+    if (!dateStr) return '-';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    const hari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'][d.getDay()];
+    const bulan = months[d.getMonth()].label;
+    return `${hari}, ${parseInt(parts[2])} ${bulan} ${parts[0]}`;
+  };
+
   const allActivities = useMemo(() => {
     const combined = [];
     tasks.forEach(task => {
       const rawDate = task.dueDateTime || task.deadline || task.dueDate || '';
       const { dateStr, timeStr } = getLocalFormat(rawDate);
+      const rawTimestamp = new Date(`${dateStr}T${timeStr !== '-' ? timeStr : '23:59'}`).getTime();
+      
       combined.push({
         id: task.id || Math.random().toString(),
         title: task.title,
         type: 'Deadline',
-        date: dateStr,
+        rawDate: dateStr,
+        formattedDate: formatIndoDate(dateStr),
         time: timeStr !== '-' ? timeStr : '23:59',
         locationOrTarget: getTargetText(task),
-        rawTimestamp: new Date(`${dateStr}T${timeStr !== '-' ? timeStr : '23:59'}`).getTime()
+        rawTimestamp
       });
     });
 
     agendas.forEach(ag => {
       const { dateStr } = getLocalFormat(ag.date || '');
+      const rawTimestamp = new Date(`${dateStr}T${ag.time || '00:00'}`).getTime();
+
       combined.push({
         id: ag.id || Math.random().toString(),
         title: ag.title,
         type: 'Agenda',
-        date: dateStr,
+        rawDate: dateStr,
+        formattedDate: formatIndoDate(dateStr),
         time: ag.time || '-',
         locationOrTarget: `Desa ${ag.desa || '-'}, Kec. ${ag.kecamatan || '-'} ${ag.sdmName ? `(${ag.sdmName})` : ''}`,
-        rawTimestamp: new Date(`${dateStr}T${ag.time || '00:00'}`).getTime()
+        rawTimestamp
       });
     });
 
@@ -88,9 +112,25 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
   }, [tasks, agendas, staffList]);
 
   const filteredActivities = useMemo(() => {
-    return allActivities.filter(item => {
-      if (!item.date) return false;
-      const [year, month] = item.date.split('-');
+    return allActivities.map(item => {
+      const diff = item.rawTimestamp - currentTime;
+      const isPast = diff < 0;
+      let countdown = '';
+
+      if (!isPast) {
+        const daysLeft = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hoursLeft = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minsLeft = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        
+        if (daysLeft > 0) countdown = `${daysLeft} Hari Lagi`;
+        else if (hoursLeft > 0) countdown = `${hoursLeft} Jam Lagi`;
+        else countdown = `${minsLeft} Menit Lagi`;
+      }
+
+      return { ...item, isPast, countdown };
+    }).filter(item => {
+      if (!item.rawDate) return false;
+      const [year, month] = item.rawDate.split('-');
       
       const matchMonth = month === selectedMonth;
       const matchYear = year === selectedYear;
@@ -99,7 +139,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
 
       return matchMonth && matchYear && matchSearch;
     });
-  }, [allActivities, selectedMonth, selectedYear, searchTerm]);
+  }, [allActivities, selectedMonth, selectedYear, searchTerm, currentTime]);
 
   const handleExportCSV = () => {
     if (filteredActivities.length === 0) {
@@ -107,15 +147,16 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
       return;
     }
 
-    let csvContent = "No,Nama Kegiatan,Jenis,Tanggal,Jam,Lokasi / Target\n";
+    let csvContent = "No,Nama Kegiatan,Jenis,Tanggal,Jam,Lokasi / Target,Status\n";
 
     filteredActivities.forEach((item, index) => {
       const title = `"${(item.title || '').replace(/"/g, '""')}"`;
       const type = `"${item.type}"`;
-      const date = `"${item.date}"`;
+      const date = `"${item.formattedDate}"`;
       const time = `"${item.time}"`;
       const location = `"${(item.locationOrTarget || '').replace(/"/g, '""')}"`;
-      csvContent += `${index + 1},${title},${type},${date},${time},${location}\n`;
+      const status = `"${item.isPast ? 'Selesai' : 'Belum Terlaksana'}"`;
+      csvContent += `${index + 1},${title},${type},${date},${time},${location},${status}\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -132,9 +173,10 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn max-w-full pb-10">
+    <div className="space-y-6 animate-fadeIn w-full pb-10">
       
-      <div className="p-5 sm:p-8 rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-white/10 shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden">
+      {/* Header Section */}
+      <div className="p-5 sm:p-8 rounded-3xl bg-slate-900 border border-white/10 shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden">
         <div className="absolute -top-12 -left-12 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
         
         <div className="z-10 space-y-1.5">
@@ -148,21 +190,22 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
             Rekap Kegiatan Bulanan
           </h1>
           <p className="text-sm font-semibold text-slate-400">
-            Arsip seluruh Agenda dan Deadline Tugas secara historis.
+            Arsip dan pantauan seluruh Agenda maupun Deadline Tugas.
           </p>
         </div>
 
         <button 
           onClick={handleExportCSV}
-          className="z-10 px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] cursor-pointer active:scale-95"
+          className="z-10 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] active:scale-95"
         >
           <FontAwesomeIcon icon={faFileExcel} className="text-lg" />
           Export Data (CSV)
         </button>
       </div>
 
+      {/* Filter Section */}
       <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-white/10 backdrop-blur-xl flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
           <div className="flex items-center gap-2 px-3 py-2 bg-slate-950 rounded-xl border border-white/10 w-full sm:w-auto">
             <FontAwesomeIcon icon={faFilter} className="text-slate-400" />
             <select 
@@ -185,7 +228,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
           </div>
         </div>
 
-        <div className="flex items-center gap-2 px-4 py-2 bg-slate-950 rounded-xl border border-white/10 w-full sm:w-64 focus-within:border-emerald-500/50 transition-colors">
+        <div className="flex items-center gap-2 px-4 py-2 bg-slate-950 rounded-xl border border-white/10 w-full sm:w-72 focus-within:border-emerald-500/50 transition-colors">
           <FontAwesomeIcon icon={faSearch} className="text-slate-400" />
           <input 
             type="text" 
@@ -197,58 +240,78 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
         </div>
       </div>
 
-      <div className="rounded-2xl bg-slate-900/80 border border-white/10 backdrop-blur-xl shadow-2xl overflow-hidden w-full">
-        <div className="overflow-x-auto w-full custom-scrollbar">
-          <table className="w-full text-left border-collapse min-w-[800px]">
+      {/* Table Section */}
+      <div className="rounded-2xl bg-slate-900/90 border border-white/10 backdrop-blur-xl shadow-2xl overflow-hidden w-full">
+        <div className="w-full overflow-x-auto custom-scrollbar">
+          <table className="w-full text-left border-collapse min-w-max">
             <thead>
-              <tr className="bg-slate-950 text-slate-400 text-xs uppercase tracking-widest border-b border-white/10">
-                <th className="p-4 font-extrabold w-16">No</th>
-                <th className="p-4 font-extrabold">Nama Kegiatan</th>
-                <th className="p-4 font-extrabold w-32">Jenis</th>
-                <th className="p-4 font-extrabold w-40">Tanggal</th>
-                <th className="p-4 font-extrabold w-32">Jam</th>
-                <th className="p-4 font-extrabold">Lokasi / Target</th>
+              <tr className="bg-slate-950/80 text-slate-400 text-xs uppercase tracking-widest border-b border-white/10">
+                <th className="p-4 font-extrabold whitespace-nowrap">No</th>
+                <th className="p-4 font-extrabold whitespace-nowrap">Nama Kegiatan</th>
+                <th className="p-4 font-extrabold whitespace-nowrap">Jenis</th>
+                <th className="p-4 font-extrabold whitespace-nowrap">Tanggal</th>
+                <th className="p-4 font-extrabold whitespace-nowrap">Jam</th>
+                <th className="p-4 font-extrabold whitespace-nowrap">Lokasi / Target</th>
+                <th className="p-4 font-extrabold whitespace-nowrap">Status Waktu</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {filteredActivities.length > 0 ? (
                 filteredActivities.map((item, index) => (
-                  <tr key={item.id} className="hover:bg-white/5 transition-colors group">
-                    <td className="p-4 text-sm font-extrabold text-slate-500">{index + 1}</td>
-                    <td className="p-4 text-sm font-extrabold text-white">{item.title}</td>
-                    <td className="p-4 text-sm">
-                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-widest ${
+                  <tr 
+                    key={item.id} 
+                    className={`hover:bg-white/5 transition-colors group ${
+                      item.isPast ? 'border-l-4 border-l-rose-500' : 'border-l-4 border-l-emerald-500'
+                    }`}
+                  >
+                    <td className="p-4 text-sm font-extrabold text-slate-500 whitespace-nowrap">{index + 1}</td>
+                    <td className="p-4 text-sm font-extrabold text-white whitespace-nowrap tracking-wide">{item.title}</td>
+                    <td className="p-4 text-sm whitespace-nowrap">
+                      <span className={`px-3 py-1.5 rounded-lg text-[10px] font-extrabold uppercase tracking-widest ${
                         item.type === 'Agenda' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-rose-500/20 text-rose-400'
                       }`}>
                         {item.type}
                       </span>
                     </td>
-                    <td className="p-4 text-sm font-bold text-slate-300">
+                    <td className="p-4 text-sm font-bold text-slate-300 whitespace-nowrap tracking-wide">
                       <div className="flex items-center gap-2">
                         <FontAwesomeIcon icon={faCalendarCheck} className="text-slate-500" />
-                        {item.date}
+                        {item.formattedDate}
                       </div>
                     </td>
-                    <td className="p-4 text-sm font-bold text-slate-300">
+                    <td className="p-4 text-sm font-bold text-slate-300 whitespace-nowrap tracking-wide">
                       <div className="flex items-center gap-2">
                         <FontAwesomeIcon icon={faClock} className="text-slate-500" />
                         {item.time}
                       </div>
                     </td>
-                    <td className="p-4 text-sm font-bold text-slate-300">
+                    <td className="p-4 text-sm font-bold text-slate-300 whitespace-nowrap tracking-wide">
                       <div className="flex items-center gap-2">
-                        <FontAwesomeIcon icon={faMapMarkerAlt} className="text-slate-500 shrink-0" />
-                        <span className="truncate max-w-[200px] sm:max-w-xs">{item.locationOrTarget}</span>
+                        <FontAwesomeIcon icon={faMapMarkerAlt} className="text-slate-500" />
+                        {item.locationOrTarget}
                       </div>
+                    </td>
+                    <td className="p-4 text-sm font-bold whitespace-nowrap tracking-wide">
+                      {item.isPast ? (
+                        <span className="flex items-center gap-2 text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-lg w-max">
+                          <FontAwesomeIcon icon={faCheckCircle} />
+                          Sudah Selesai
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg w-max">
+                          <FontAwesomeIcon icon={faHourglassHalf} className="animate-pulse" />
+                          {item.countdown}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" className="p-10 text-center">
+                  <td colSpan="7" className="p-12 text-center">
                     <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
                       <FontAwesomeIcon icon={faSearch} className="text-3xl opacity-50 mb-2" />
-                      <span className="text-sm font-extrabold">Tidak ada data kegiatan ditemukan</span>
+                      <span className="text-sm font-extrabold uppercase tracking-widest">Tidak ada kegiatan</span>
                       <span className="text-xs font-semibold">Coba ubah filter bulan atau kata kunci pencarian.</span>
                     </div>
                   </td>
