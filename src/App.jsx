@@ -9,6 +9,7 @@ import SdmManagementView from './views/SdmManagementView';
 import TimelineView from './views/TimelineView';
 import CatatanView from './views/CatatanView';
 import PengaduanView from './views/Pengaduan';
+import RekapKegiatan from './views/RekapKegiatan'; // Komponen baru ditambahkan di sini
 import GlassLoader from './components/GlassLoader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
@@ -30,7 +31,8 @@ import {
   faEllipsisH,
   faKey,
   faUserCheck,
-  faLock
+  faLock,
+  faTable // Icon baru ditambahkan di sini
 } from '@fortawesome/free-solid-svg-icons';
 
 // =============================================================================
@@ -92,13 +94,13 @@ function MainLayout() {
   // Daftar Tab Yang Diperbolehkan Menurut Role
   const getAllowedTabs = (role) => {
     if (role === 'admin') {
-      return ['dashboard', 'catatan', 'piket', 'agenda', 'timeline', 'tugas', 'pengaduan', 'sdm'];
+      return ['dashboard', 'catatan', 'piket', 'agenda', 'timeline', 'tugas', 'pengaduan', 'sdm', 'rekap'];
     }
     if (role === 'sdm') {
-      return ['dashboard', 'piket', 'agenda', 'timeline', 'pengaduan'];
+      return ['dashboard', 'piket', 'agenda', 'timeline', 'pengaduan', 'rekap'];
     }
     // Default Publik
-    return ['dashboard', 'piket', 'timeline'];
+    return ['dashboard', 'piket', 'timeline', 'rekap'];
   };
 
   // Simpan state activeTab & userRole ke LocalStorage + Validasi Akses Tab
@@ -274,6 +276,7 @@ function MainLayout() {
     { id: 'piket', label: 'Jadwal Piket', icon: faCalendarAlt },
     ...(isSdm || isAdmin ? [{ id: 'agenda', label: 'Agenda Kerja', icon: faClipboardList }] : []),
     { id: 'timeline', label: 'Timeline 3D', icon: faStream },
+    { id: 'rekap', label: 'Rekap Kegiatan', icon: faTable },
     ...(isAdmin ? [{ id: 'tugas', label: 'Tugas & Deadline', icon: faTasks }] : []),
     ...(isSdm || isAdmin ? [{ id: 'pengaduan', label: 'Pengaduan KPM', icon: faHeadset }] : []),
     ...(isAdmin ? [{ id: 'sdm', label: 'Kelola SDM & Config', icon: faUsers }] : [])
@@ -564,6 +567,14 @@ function MainLayout() {
           <TimelineView
             agendas={agendas}
             tasks={tasks}
+            staffList={staffList}
+          />
+        )}
+
+        {activeTab === 'rekap' && (
+          <RekapKegiatan
+            tasks={tasks}
+            agendas={agendas}
             staffList={staffList}
           />
         )}
