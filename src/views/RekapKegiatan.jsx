@@ -3,22 +3,20 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faCalendarAlt, 
   faFileExcel, 
-  faTasks, 
-  faCalendarCheck, 
-  faMapMarkerAlt, 
-  faUser,
-  faFilter,
-  faSearch
+  faFilter, 
+  faSearch,
+  faCalendarCheck,
+  faMapMarkerAlt,
+  faClock
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function RekapKegiatan({ tasks = [], agendas = [], staffList = [] }) {
-  // Setup Waktu Default (Bulan & Tahun Saat Ini)
+  // Setup Waktu Default
   const today = new Date();
   const [selectedMonth, setSelectedMonth] = useState(String(today.getMonth() + 1).padStart(2, '0'));
   const [selectedYear, setSelectedYear] = useState(String(today.getFullYear()));
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Opsi Bulan & Tahun
   const months = [
     { value: '01', label: 'Januari' }, { value: '02', label: 'Februari' },
     { value: '03', label: 'Maret' }, { value: '04', label: 'April' },
@@ -31,7 +29,6 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
   const currentYear = today.getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => String(currentYear - 2 + i));
 
-  // Helper mendapatkan nama SDM
   const getStaffName = (id) => {
     const found = staffList.find((s) => (typeof s === 'object' ? s.id === id || s.name === id || s.NAMA === id : s === id));
     if (found) return typeof found === 'object' ? found.name || found.NAMA || found.nama || found.id : found;
@@ -58,10 +55,8 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
     };
   };
 
-  // 1. Normalisasi & Gabungkan Data
   const allActivities = useMemo(() => {
     const combined = [];
-
     tasks.forEach(task => {
       const rawDate = task.dueDateTime || task.deadline || task.dueDate || '';
       const { dateStr, timeStr } = getLocalFormat(rawDate);
@@ -89,10 +84,9 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
       });
     });
 
-    return combined.sort((a, b) => b.rawTimestamp - a.rawTimestamp); // Urutkan terbaru ke terlama
+    return combined.sort((a, b) => b.rawTimestamp - a.rawTimestamp);
   }, [tasks, agendas, staffList]);
 
-  // 2. Filter Berdasarkan Bulan, Tahun, dan Pencarian
   const filteredActivities = useMemo(() => {
     return allActivities.filter(item => {
       if (!item.date) return false;
@@ -107,32 +101,26 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
     });
   }, [allActivities, selectedMonth, selectedYear, searchTerm]);
 
-  // 3. Fungsi Export ke CSV
   const handleExportCSV = () => {
     if (filteredActivities.length === 0) {
       alert("Tidak ada data untuk diexport pada bulan ini.");
       return;
     }
 
-    // Header CSV
     let csvContent = "No,Nama Kegiatan,Jenis,Tanggal,Jam,Lokasi / Target\n";
 
-    // Data Rows (Escape koma dengan tanda kutip ganda)
     filteredActivities.forEach((item, index) => {
       const title = `"${(item.title || '').replace(/"/g, '""')}"`;
       const type = `"${item.type}"`;
       const date = `"${item.date}"`;
       const time = `"${item.time}"`;
       const location = `"${(item.locationOrTarget || '').replace(/"/g, '""')}"`;
-
       csvContent += `${index + 1},${title},${type},${date},${time},${location}\n`;
     });
 
-    // Buat file Blob dan download
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-    
     const monthName = months.find(m => m.value === selectedMonth)?.label;
     
     link.setAttribute("href", url);
@@ -146,7 +134,6 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
   return (
     <div className="space-y-6 animate-fadeIn max-w-full pb-10">
       
-      {/* HEADER WIDGET */}
       <div className="p-5 sm:p-8 rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-white/10 shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden">
         <div className="absolute -top-12 -left-12 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
         
@@ -160,21 +147,20 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
             <FontAwesomeIcon icon={faCalendarAlt} className="text-emerald-400" />
             Rekap Kegiatan Bulanan
           </h1>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm font-semibold text-slate-400">
             Arsip seluruh Agenda dan Deadline Tugas secara historis.
           </p>
         </div>
 
         <button 
           onClick={handleExportCSV}
-          className="z-10 px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] cursor-pointer active:scale-95"
+          className="z-10 px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] cursor-pointer active:scale-95"
         >
           <FontAwesomeIcon icon={faFileExcel} className="text-lg" />
           Export Data (CSV)
         </button>
       </div>
 
-      {/* FILTER BAR */}
       <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-white/10 backdrop-blur-xl flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="flex items-center gap-2 px-3 py-2 bg-slate-950 rounded-xl border border-white/10 w-full sm:w-auto">
@@ -182,7 +168,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
             <select 
               value={selectedMonth} 
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-transparent text-white text-sm outline-none font-semibold cursor-pointer w-full"
+              className="bg-transparent text-white text-sm outline-none font-bold cursor-pointer w-full"
             >
               {months.map(m => <option key={m.value} value={m.value} className="bg-slate-900">{m.label}</option>)}
             </select>
@@ -192,7 +178,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
             <select 
               value={selectedYear} 
               onChange={(e) => setSelectedYear(e.target.value)}
-              className="bg-transparent text-white text-sm outline-none font-semibold cursor-pointer w-full"
+              className="bg-transparent text-white text-sm outline-none font-bold cursor-pointer w-full"
             >
               {years.map(y => <option key={y} value={y} className="bg-slate-900">{y}</option>)}
             </select>
@@ -206,65 +192,72 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
             placeholder="Cari kegiatan/lokasi..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-transparent outline-none text-sm text-white w-full placeholder:text-slate-500"
+            className="bg-transparent outline-none text-sm font-semibold text-white w-full placeholder:text-slate-500"
           />
         </div>
       </div>
 
-      {/* TABEL DATA */}
       <div className="rounded-2xl bg-slate-900/80 border border-white/10 backdrop-blur-xl shadow-2xl overflow-hidden w-full">
         <div className="overflow-x-auto w-full custom-scrollbar">
           <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
               <tr className="bg-slate-950 text-slate-400 text-xs uppercase tracking-widest border-b border-white/10">
-                <th className="p-4 fontUntuk menambahkan menu **Rekap Kegiatan** dengan fitur tabel *read-only* (hanya baca) dan bisa diekspor, cara paling efektif dan rapi adalah menggunakan *library* **DataTables** dikombinasikan dengan ekstensi **Buttons** (untuk ekspor ke Excel, PDF, atau CSV). 
-
-Berikut adalah rancangan struktur tampilan dan kode yang bisa Anda terapkan (baik menggunakan Google Apps Script, PHP, maupun *framework* web lainnya).
-
-### 1. Struktur *User Interface* (HTML & CSS)
-Tabel dibuat tanpa kolom "Aksi" (seperti tombol edit/hapus) untuk memastikan statusnya murni *read-only*. Tambahkan filter bulan di atas tabel untuk memudahkan rekap per bulan.
-
-```html
-<!-- Load CSS DataTables & Ekstensi Export -->
-<link rel="stylesheet" href="[https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css](https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css)">
-<link rel="stylesheet" href="[https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css](https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css)">
-
-<div class="container-rekap">
-    <h2>Rekap Kegiatan Bulanan</h2>
-    
-    <!-- Opsi Filter Bulan (Jika data di-load semua lalu difilter di sisi client) -->
-    <div style="margin-bottom: 20px;">
-        <label for="filterBulan">Pilih Bulan: </label>
-        <input type="month" id="filterBulan" class="form-control">
+                <th className="p-4 font-extrabold w-16">No</th>
+                <th className="p-4 font-extrabold">Nama Kegiatan</th>
+                <th className="p-4 font-extrabold w-32">Jenis</th>
+                <th className="p-4 font-extrabold w-40">Tanggal</th>
+                <th className="p-4 font-extrabold w-32">Jam</th>
+                <th className="p-4 font-extrabold">Lokasi / Target</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {filteredActivities.length > 0 ? (
+                filteredActivities.map((item, index) => (
+                  <tr key={item.id} className="hover:bg-white/5 transition-colors group">
+                    <td className="p-4 text-sm font-extrabold text-slate-500">{index + 1}</td>
+                    <td className="p-4 text-sm font-extrabold text-white">{item.title}</td>
+                    <td className="p-4 text-sm">
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-widest ${
+                        item.type === 'Agenda' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-rose-500/20 text-rose-400'
+                      }`}>
+                        {item.type}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm font-bold text-slate-300">
+                      <div className="flex items-center gap-2">
+                        <FontAwesomeIcon icon={faCalendarCheck} className="text-slate-500" />
+                        {item.date}
+                      </div>
+                    </td>
+                    <td className="p-4 text-sm font-bold text-slate-300">
+                      <div className="flex items-center gap-2">
+                        <FontAwesomeIcon icon={faClock} className="text-slate-500" />
+                        {item.time}
+                      </div>
+                    </td>
+                    <td className="p-4 text-sm font-bold text-slate-300">
+                      <div className="flex items-center gap-2">
+                        <FontAwesomeIcon icon={faMapMarkerAlt} className="text-slate-500 shrink-0" />
+                        <span className="truncate max-w-[200px] sm:max-w-xs">{item.locationOrTarget}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="6" className="p-10 text-center">
+                    <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
+                      <FontAwesomeIcon icon={faSearch} className="text-3xl opacity-50 mb-2" />
+                      <span className="text-sm font-extrabold">Tidak ada data kegiatan ditemukan</span>
+                      <span className="text-xs font-semibold">Coba ubah filter bulan atau kata kunci pencarian.</span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
-
-    <!-- Struktur Tabel -->
-    <table id="tabelRekap" class="display nowrap" style="width:100%">
-        <thead>
-            <tr>
-                <th>No</th>
-                <th>Nama Kegiatan</th>
-                <th>Jenis Kegiatan</th>
-                <th>Waktu</th>
-                <th>Lokasi</th>
-            </tr>
-        </thead>
-        <tbody>
-            <!-- Contoh Data (Nanti diisi dinamis dari database/spreadsheet) -->
-            <tr>
-                <td>1</td>
-                <td>Rapat Koordinasi Evaluasi</td>
-                <td>Agenda</td>
-                <td>2026-09-05 09:00</td>
-                <td>Kantor Utama</td>
-            </tr>
-            <tr>
-                <td>2</td>
-                <td>Pengumpulan Laporan Lapangan</td>
-                <td>Deadline</td>
-                <td>2026-09-10 23:59</td>
-                <td>Sistem Online</td>
-            </tr>
-        </tbody>
-    </table>
-</div>
+  );
+}
