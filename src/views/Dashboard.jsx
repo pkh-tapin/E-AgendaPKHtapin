@@ -122,7 +122,6 @@ export default function Dashboard({
   const minutesStr = String(dateObj.getMinutes()).padStart(2, '0');
   const secondsStr = String(dateObj.getSeconds()).padStart(2, '0');
 
-  // Format Standar Hari dan Tanggal
   const formatIndoDate = (dateStr) => {
     if (!dateStr) return '-';
     const d = new Date(`${dateStr}T00:00:00`);
@@ -130,7 +129,6 @@ export default function Dashboard({
     return `${namaHari[d.getDay()]}, ${d.getDate()} ${namaBulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  // Helper Sinkronisasi Zona Waktu Lokal
   const getLocalFormat = (input) => {
     if (!input) return { dateStr: '', timeStr: '23:59' };
     if (!input.includes('T')) return { dateStr: input, timeStr: '23:59' };
@@ -151,7 +149,6 @@ export default function Dashboard({
   const combinedItems = [];
   const todayStr = `${currentYear}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(currentDayNum).padStart(2,'0')}`;
 
-  // 1. Ekstrak Data Tugas
   tasks.forEach(task => {
     const rawDate = task.dueDateTime || task.deadline || task.dueDate || '';
     const { dateStr, timeStr } = getLocalFormat(rawDate);
@@ -164,7 +161,6 @@ export default function Dashboard({
     });
   });
 
-  // 2. Ekstrak Data Agenda (Hanya Hari Ini & Mendatang)
   agendas.forEach(ag => {
     const rawDate = ag.date || '';
     const { dateStr, timeStr } = getLocalFormat(rawDate);
@@ -180,22 +176,21 @@ export default function Dashboard({
     }
   });
 
-  // Sort berdasarkan jam
   combinedItems.sort((a, b) => a.timestamp - b.timestamp);
 
-  // Group berdasarkan Tanggal
+  // Group berdasarkan Tanggal (DENGAN FILTER HILANGKAN YANG TERLEWAT)
   const groupedItems = {};
   combinedItems.forEach(item => {
+    // KUNCI: Jika waktu kegiatan sudah lewat dari real-time saat ini, jangan dimasukkan (Sembunyikan)
+    if (item.timestamp <= nowTimestamp) return; 
+
     if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
     groupedItems[item.sortDate].push(item);
   });
   
   const sortedDates = Object.keys(groupedItems).sort((a,b) => new Date(a) - new Date(b));
-
-  // Ambil data spesifik untuk Tabel Rincian Hari Ini
   const todayItems = groupedItems[todayStr] || [];
 
-  // Calculation Countdown Engine Terpusat
   const getCountdown = (targetTime) => {
     const diff = targetTime - nowTimestamp;
 
@@ -231,7 +226,7 @@ export default function Dashboard({
   };
 
   // -------------------------------------------------------------
-  // AGENDA 3 HARI KERJA (Untuk Card Status Minimalis)
+  // AGENDA 3 HARI KERJA & AGENDA HARI INI (Filter Aktif Realtime)
   // -------------------------------------------------------------
   const getNext3WorkingDays = (startDate) => {
     const dates = [];
@@ -254,6 +249,21 @@ export default function Dashboard({
     if (!ag.date) return false;
     const cleanDate = ag.date.includes('T') ? ag.date.split('T')[0] : ag.date;
     return next3WorkingDates.includes(cleanDate);
+  });
+
+  // Filter untuk menghilangkan Agenda Kecil yang sudah terlewat waktu
+  const activeTodayAgenda = todayAgenda.filter(ag => {
+    const { dateStr, timeStr } = getLocalFormat(ag.date || '');
+    const tStr = ag.time || timeStr || '23:59';
+    const ts = new Date(`${dateStr || todayStr}T${tStr.length === 5 ? tStr + ':00' : tStr}`).getTime();
+    return ts > nowTimestamp;
+  });
+
+  const activeUpcomingAgenda = upcoming3DaysAgendaList.filter(ag => {
+    const { dateStr, timeStr } = getLocalFormat(ag.date || '');
+    const tStr = ag.time || timeStr || '23:59';
+    const ts = new Date(`${dateStr || todayStr}T${tStr.length === 5 ? tStr + ':00' : tStr}`).getTime();
+    return ts > nowTimestamp;
   });
 
   // -------------------------------------------------------------
@@ -346,9 +356,7 @@ export default function Dashboard({
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10 overflow-hidden">
       
-      {/* ------------------------------------------------------------- */}
       {/* HEADER WIDGET JAM DIGITAL 3D */}
-      {/* ------------------------------------------------------------- */}
       <div className="p-4 sm:p-8 rounded-3xl bg-gradient-to-r from-indigo-950/90 via-slate-900/95 to-purple-950/90 border border-indigo-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden transition-all duration-300 hover:border-indigo-400/60">
         <div className="absolute -top-12 -left-12 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"></div>
@@ -405,9 +413,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* ------------------------------------------------------------- */}
       {/* FITUR BARU: TABEL RINCIAN KEGIATAN HARI INI (MOBILE-FIRST)  */}
-      {/* ------------------------------------------------------------- */}
       <div className="space-y-4 sm:space-y-6 pt-2 relative z-10 w-full">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white border-b border-white/10 pb-3">
           <div className="flex items-center gap-3">
@@ -418,7 +424,7 @@ export default function Dashboard({
           </div>
           <span className="text-xs font-bold text-emerald-300 bg-emerald-900/50 px-3 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 w-fit shadow-inner">
             <FontAwesomeIcon icon={faCalendarCheck} />
-            Total: {todayItems.length} Aktivitas
+            Total: {todayItems.length} Aktivitas Aktif
           </span>
         </div>
 
@@ -487,7 +493,7 @@ export default function Dashboard({
                   <tr>
                     <td colSpan="4" className="p-10 text-center text-slate-400 italic text-xs sm:text-sm bg-slate-900/30">
                       <FontAwesomeIcon icon={faCheckCircle} className="text-3xl text-slate-600 mb-3 block mx-auto" />
-                      Tidak ada rincian kegiatan atau tugas untuk hari ini.
+                      Semua agenda atau tugas untuk hari ini sudah selesai/terlewati.
                     </td>
                   </tr>
                 )}
@@ -497,17 +503,14 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* ------------------------------------------------------------- */}
       {/* SECTION UTAMA: JADWAL & DEADLINE TERPADU (GROUPED BY DATE) */}
-      {/* ------------------------------------------------------------- */}
       <div className="space-y-5 sm:space-y-6 relative mt-10 w-full">
-        {/* Glow Background Header */}
         <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-cyan-500/10 rounded-3xl blur-xl pointer-events-none"></div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white relative z-10 px-2 border-b border-white/10 pb-4">
           <div className="flex items-center gap-3">
             <FontAwesomeIcon icon={faTasks} className="text-2xl sm:text-3xl text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.6)]" />
             <h2 className="text-xl sm:text-3xl font-black tracking-wide drop-shadow-lg uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">
-              Jadwal Kegiatan & Deadline Tugas
+              Jadwal Kegiatan & Deadline Tugas Aktif
             </h2>
           </div>
           <span className="text-xs font-bold text-slate-400 bg-slate-900/50 px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 w-fit shrink-0">
@@ -542,7 +545,7 @@ export default function Dashboard({
                             {formatIndoDate(dateStr)}
                             {isToday && <span className="ml-2 text-[10px] sm:text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-widest align-middle">Hari Ini</span>}
                           </h3>
-                          <p className="text-xs text-slate-400 font-medium mt-1 truncate">Total {items.length} aktivitas terdaftar pada tanggal ini.</p>
+                          <p className="text-xs text-slate-400 font-medium mt-1 truncate">Total {items.length} aktivitas aktif pada tanggal ini.</p>
                         </div>
                       </div>
                     </div>
@@ -557,7 +560,6 @@ export default function Dashboard({
                               
                               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-                              {/* Kiri: Info Judul & Label */}
                               <div className="flex-1 flex flex-col justify-between z-10 space-y-3 min-w-0">
                                 <div>
                                   <div className="flex items-center gap-2 mb-2">
@@ -582,7 +584,6 @@ export default function Dashboard({
                                 </div>
                               </div>
 
-                              {/* Kanan: Panel Countdown Digital yang Rapih */}
                               <div className="lg:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-5">
                                  <div className="flex items-center gap-2 mb-2">
                                     <div className="relative flex h-2.5 w-2.5">
@@ -626,15 +627,11 @@ export default function Dashboard({
                             </div>
                           )
                         } else {
-                          // ==========================================
-                          // UI AGENDA / KEGIATAN (BIRU - CYAN)
-                          // ==========================================
                           return (
                             <div key={idx} className="flex flex-col lg:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/30 to-slate-900/60 border-l-[8px] border-l-cyan-500 border-y border-r border-cyan-500/20 hover:from-cyan-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch w-full">
                               
                               <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-                              {/* Kiri: Info Judul & Label */}
                               <div className="flex-1 flex flex-col justify-between z-10 space-y-3 min-w-0">
                                 <div>
                                   <div className="flex items-center gap-2 mb-2">
@@ -661,7 +658,6 @@ export default function Dashboard({
                                 </div>
                               </div>
 
-                              {/* Kanan: Label Jam Rapi */}
                               <div className="lg:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-5">
                                  <div className="flex items-center gap-2 mb-2">
                                     <FontAwesomeIcon icon={faCalendarCheck} className="text-cyan-400 text-sm" />
@@ -694,15 +690,13 @@ export default function Dashboard({
               <div className="mb-3">
                 <FontAwesomeIcon icon={faCalendarAlt} className="text-4xl text-slate-600" />
               </div>
-              Belum ada tugas atau agenda krusial yang aktif saat ini.
+              Semua tugas atau agenda penting saat ini sudah selesai/terlewati.
             </div>
           )}
         </div>
       </div>
 
-      {/* ------------------------------------------------------------- */}
       {/* DUAL SECTION: PAPAN PENGUMUMAN & PAPAN CATATAN SDM */}
-      {/* ------------------------------------------------------------- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 pt-6 border-t border-white/10 mt-6">
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-amber-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
           <div className="flex justify-between items-center flex-wrap gap-2">
@@ -779,9 +773,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* ------------------------------------------------------------- */}
       {/* STATUS CARDS MINIMALIS (PIKET, AGENDA KECIL, & SWAP) */}
-      {/* ------------------------------------------------------------- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-emerald-400/60">
           <div className="flex items-center gap-2.5 mb-3 sm:mb-4 text-emerald-400 shrink-0">
@@ -817,7 +809,7 @@ export default function Dashboard({
                   agendaTab === 'today' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Hari Ini ({todayAgenda.length})
+                Hari Ini ({activeTodayAgenda.length})
               </button>
               <button
                 onClick={() => setAgendaTab('upcoming3')}
@@ -825,14 +817,14 @@ export default function Dashboard({
                   agendaTab === 'upcoming3' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                3 Hari Kerja ({upcoming3DaysAgendaList.length})
+                3 Hari Kerja ({activeUpcomingAgenda.length})
               </button>
             </div>
           </div>
           <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
             {agendaTab === 'today' ? (
-              todayAgenda.length > 0 ? (
-                todayAgenda.map((ag, idx) => (
+              activeTodayAgenda.length > 0 ? (
+                activeTodayAgenda.map((ag, idx) => (
                   <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-cyan-500/10 transition-colors">
                     <span className="font-bold text-cyan-200 block text-xs sm:text-sm break-words">{ag.title}</span>
                     <span className="text-[10px] sm:text-[11px] text-slate-300 block mt-1">
@@ -851,8 +843,8 @@ export default function Dashboard({
                 </div>
               )
             ) : (
-              upcoming3DaysAgendaList.length > 0 ? (
-                upcoming3DaysAgendaList.map((ag, idx) => (
+              activeUpcomingAgenda.length > 0 ? (
+                activeUpcomingAgenda.map((ag, idx) => (
                   <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-indigo-500/20 hover:bg-indigo-500/10 transition-colors">
                     <div className="flex justify-between items-center mb-1 gap-1">
                       <span className="font-bold text-indigo-200 block text-xs truncate flex-1">{ag.title}</span>
@@ -925,9 +917,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* ------------------------------------------------------------- */}
-      {/* MODAL COMPONENTS TETAP UTUH */}
-      {/* ------------------------------------------------------------- */}
+      {/* MODAL COMPONENTS TETAP UTUH (DIKUNCI MATI) */}
       {editLogModalOpen && editingLog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-md p-5 sm:p-7 rounded-3xl bg-slate-900 border border-purple-500/50 shadow-2xl relative space-y-4 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
