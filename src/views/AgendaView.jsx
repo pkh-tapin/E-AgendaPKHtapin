@@ -25,6 +25,34 @@ import {
 // DAFTAR NAMA DUMMY LEGACY UNTUK DISARING TOTAL
 const DUMMY_SAMPLE_NAMES = ['ahmad', 'budi', 'siti', 'dewi', 'eko', 'fajar', 'gita', 'hadi'];
 
+// DATA SMART FILTER MODUL P2K2 PKH
+const P2K2_DATA = {
+  "Modul 1: Pendidikan dan Pengasuhan Anak": [
+    "Sesi 1: Menjadi Orang Tua yang Lebih Baik",
+    "Sesi 2: Memahami Perilaku Anak Usia Dini",
+    "Sesi 3: Memahami Cara Anak Usia Dini Belajar",
+    "Sesi 4: Membantu Anak Sukses di Sekolah"
+  ],
+  "Modul 2: Pengelolaan Keuangan dan Perencanaan Usaha": [
+    "Sesi 1: Mengelola Keuangan Keluarga",
+    "Sesi 2: Cermat Meminjam dan Menabung",
+    "Sesi 3: Memulai Usaha"
+  ],
+  "Modul 3: Kesehatan dan Gizi": [
+    "Sesi 1: Pentingnya Gizi dan Layanan Kesehatan Ibu Hamil",
+    "Sesi 2: Pentingnya Gizi untuk Ibu Menyusui dan Balita",
+    "Sesi 3: Kesakitan pada Anak dan Kesehatan Lingkungan"
+  ],
+  "Modul 4: Perlindungan Anak": [
+    "Sesi 1: Pencegahan Kekerasan dan Perlakuan Salah",
+    "Sesi 2: Pencegahan Penelantaran dan Eksploitasi"
+  ],
+  "Modul 5: Kesejahteraan Sosial": [
+    "Sesi 1: Pelayanan bagi Penyandang Disabilitas Berat",
+    "Sesi 2: Pelayanan bagi Lanjut Usia"
+  ]
+};
+
 // HELPER PARSING ARRAY DESA SDM
 const parseDesaArray = (rawDesa) => {
   if (!rawDesa) return [];
@@ -217,7 +245,9 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
     time: '',
     kecamatan: '',
     desa: '',
-    category: 'Rapat'
+    category: 'Rapat',
+    modulP2K2: '', // State baru untuk P2K2
+    sesiP2K2: ''   // State baru untuk P2K2
   });
 
   const [editingId, setEditingId] = useState(null);
@@ -269,12 +299,25 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
       return showToast('Harap isi semua kolom agenda termasuk Nama SDM dan Lokasi Desa!', 'error');
     }
 
+    // Validasi Khusus Jika Kategori adalah P2K2
+    const isP2K2Category = formData.category && formData.category.toUpperCase().includes('P2K2');
+    if (isP2K2Category && (!formData.modulP2K2 || !formData.sesiP2K2)) {
+      return showToast('Harap pilih Modul dan Sesi P2K2 PKH!', 'error');
+    }
+
+    // Jika bukan P2K2, pastikan modul/sesi kosong agar tidak masuk ke database secara tidak sengaja
+    const finalData = { ...formData };
+    if (!isP2K2Category) {
+      finalData.modulP2K2 = '';
+      finalData.sesiP2K2 = '';
+    }
+
     if (editingId) {
-      update(ref(db, `agendas/${editingId}`), formData);
+      update(ref(db, `agendas/${editingId}`), finalData);
       showToast('Agenda berhasil diperbarui!', 'success');
     } else {
       push(ref(db, 'agendas'), {
-        ...formData,
+        ...finalData,
         isSupervisiKatim: false
       });
       showToast('Agenda kerja baru berhasil dibuat!', 'success');
@@ -291,7 +334,9 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
       time: '',
       kecamatan: '',
       desa: '',
-      category: localCategories[0]?.name || 'Rapat'
+      category: localCategories[0]?.name || 'Rapat',
+      modulP2K2: '',
+      sesiP2K2: ''
     });
     setEditingId(null);
   };
@@ -306,7 +351,9 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
       time: ag.time || '',
       kecamatan: agKec,
       desa: ag.desa || '',
-      category: ag.category || localCategories[0]?.name || 'Rapat'
+      category: ag.category || localCategories[0]?.name || 'Rapat',
+      modulP2K2: ag.modulP2K2 || '',
+      sesiP2K2: ag.sesiP2K2 || ''
     });
   };
 
@@ -446,6 +493,40 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
               ))}
             </select>
           </div>
+
+          {/* Form Ekstra P2K2 - Muncul Otomatis Jika Kategori Memiliki Kata "P2K2" */}
+          {formData.category && formData.category.toUpperCase().includes('P2K2') && (
+            <>
+              <div className="lg:col-span-1">
+                <label className="text-[11px] sm:text-xs font-semibold text-amber-300 block mb-1.5">Modul P2K2 PKH</label>
+                <select
+                  value={formData.modulP2K2}
+                  onChange={(e) => setFormData({ ...formData, modulP2K2: e.target.value, sesiP2K2: '' })}
+                  className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950/80 border border-amber-500/30 text-white text-xs sm:text-sm focus:border-amber-500 outline-none cursor-pointer transition-colors shadow-[0_0_15px_rgba(245,158,11,0.05)]"
+                >
+                  <option value="" className="bg-slate-900 text-slate-400">-- Pilih Modul P2K2 --</option>
+                  {Object.keys(P2K2_DATA).map((modul) => (
+                    <option key={modul} value={modul} className="bg-slate-900">{modul}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="lg:col-span-2">
+                <label className="text-[11px] sm:text-xs font-semibold text-amber-300 block mb-1.5">Sesi P2K2 PKH</label>
+                <select
+                  value={formData.sesiP2K2}
+                  onChange={(e) => setFormData({ ...formData, sesiP2K2: e.target.value })}
+                  disabled={!formData.modulP2K2}
+                  className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950/80 border border-amber-500/30 text-white text-xs sm:text-sm focus:border-amber-500 outline-none cursor-pointer disabled:opacity-50 transition-colors shadow-[0_0_15px_rgba(245,158,11,0.05)]"
+                >
+                  <option value="" className="bg-slate-900 text-slate-400">-- Pilih Sesi P2K2 --</option>
+                  {formData.modulP2K2 && P2K2_DATA[formData.modulP2K2].map((sesi) => (
+                    <option key={sesi} value={sesi} className="bg-slate-900">{sesi}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
 
           {/* Kecamatan (KUNCI OTOMATIS BERDASARKAN DATABASE SDM TERPILIH) */}
           <div>
@@ -639,6 +720,17 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
                     <span>Desa {ag.desa}, Kec. {ag.kecamatan}</span>
                   </p>
 
+                  {/* Render Ekstra Data Modul P2K2 Jika Tersedia */}
+                  {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
+                    <div className="mb-3 p-2.5 rounded-xl bg-slate-950/50 border border-amber-500/20">
+                      <div className="text-[11px] font-bold text-amber-400 mb-0.5">{ag.modulP2K2}</div>
+                      <div className="text-[10px] text-slate-300 flex items-start gap-1.5">
+                        <span className="text-amber-500 mt-0.5 shrink-0">•</span>
+                        <span>{ag.sesiP2K2}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {ag.isSupervisiKatim && (
                     <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold">
                       <FontAwesomeIcon icon={faUserShield} />
@@ -648,14 +740,16 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
                 </div>
 
                 <div className="flex items-center justify-between pt-3 border-t border-white/10 mt-1">
+                  {/* Button Supervisi Terkunci Hanya untuk Admin */}
                   <button
                     onClick={() => handleToggleSupervisi(ag)}
-                    className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-xl border transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
+                    disabled={!isAdmin}
+                    className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-xl border transition-all flex items-center gap-1 ${
                       ag.isSupervisiKatim
                         ? 'bg-amber-500/20 border-amber-400/30 text-amber-300'
                         : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
-                    }`}
-                    title={isAdmin ? 'Klik untuk mengubah status supervisi' : 'Khusus Ketua Tim'}
+                    } ${!isAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer active:scale-95'}`}
+                    title={isAdmin ? 'Klik untuk mengubah status supervisi' : 'Akses Khusus Ketua Tim (Admin)'}
                   >
                     <FontAwesomeIcon icon={isAdmin ? faUserShield : faLock} />
                     <span>{ag.isSupervisiKatim ? 'Disupervisi' : 'Pilih Supervisi'}</span>
