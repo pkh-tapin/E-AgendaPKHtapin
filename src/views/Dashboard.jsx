@@ -353,6 +353,11 @@ export default function Dashboard({
 
   const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
 
+  // FIX: Memastikan data todayPiket terbaca sempurna (konversi Object ke Array jika data dari Firebase berwujud Object)
+  const safeTodayPiket = Array.isArray(todayPiket) 
+    ? todayPiket 
+    : (todayPiket ? Object.values(todayPiket) : []);
+
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10 overflow-hidden">
       
@@ -781,13 +786,16 @@ export default function Dashboard({
             <h3 className="font-bold text-base sm:text-lg text-white">Piket Hari Ini</h3>
           </div>
           <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
-            {todayPiket.length > 0 ? (
-              todayPiket.map((p, idx) => (
-                <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 flex justify-between items-center hover:bg-emerald-500/10 transition-colors">
-                  <span className="font-semibold text-slate-100 text-xs sm:text-sm truncate">{getStaffName(p)}</span>
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399] shrink-0"></span>
-                </div>
-              ))
+            {safeTodayPiket.length > 0 ? (
+              safeTodayPiket.map((p, idx) => {
+                const staffId = typeof p === 'object' && p !== null ? (p.staffId || p.id || p.name || p.NAMA || p.nama || JSON.stringify(p)) : p;
+                return (
+                  <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 flex justify-between items-center hover:bg-emerald-500/10 transition-colors">
+                    <span className="font-semibold text-slate-100 text-xs sm:text-sm truncate">{getStaffName(staffId)}</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399] shrink-0"></span>
+                  </div>
+                );
+              })
             ) : (
               <div className="flex items-center justify-center h-full py-6 sm:py-0">
                 <p className="text-xs sm:text-sm text-slate-400 italic">Tidak ada jadwal piket aktif hari ini.</p>
