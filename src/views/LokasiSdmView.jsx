@@ -54,11 +54,14 @@ export default function LokasiSdmView({
   });
 
   // ---------------------------------------------------------------------------
-  // 2. PEMBERSIHAN DATA SDM (MENCEGAH LEBIH DARI 29 DATA & HAPUS DUPLIKAT)
+  // 2. PEMBERSIHAN DATA SDM (MENCEGAH GHOST DATA, DUMMY, & HAPUS DUPLIKAT)
   // ---------------------------------------------------------------------------
   const getValidStaffList = () => {
     const uniqueStaff = [];
     const seenNames = new Set();
+    
+    // Daftar blacklist nama dummy sisa uji coba (A-H)
+    const dummyNames = ['andi', 'budi', 'siti', 'dewi', 'eko', 'fajar', 'gita', 'hadi', 'iwan', 'joko', 'test'];
 
     staffList.forEach(staff => {
       if (!staff) return;
@@ -66,9 +69,26 @@ export default function LokasiSdmView({
       
       if (sdmName && sdmName !== 'undefined' && sdmName !== 'null') {
         const lowerName = sdmName.toLowerCase();
+        
         if (!seenNames.has(lowerName)) {
-          seenNames.add(lowerName);
-          uniqueStaff.push(staff);
+          
+          // MENDETEKSI "GHOST DATA" ATAU SISA STRING TEST DI FIREBASE
+          const isDummyName = dummyNames.includes(lowerName);
+          
+          // Data SDM riil (hasil import Excel) PASTI memiliki metadata tambahan (Jabatan, NIP, dsb).
+          // Ghost data biasanya cuma berisi nama saja tanpa atribut terstruktur.
+          const hasValidMetadata = Boolean(
+            staff.jabatan || staff.jabatan_tim || staff.NIP || staff.nip || 
+            staff.kecamatan || staff.desa || staff.status_pegawai || staff.no_hp || staff.email
+          );
+
+          // SYARAT DATA VALID (Untuk Menyamakan dengan Jumlah Akurat Database):
+          // 1. BUKAN nama dummy test (Hadi, Budi, Siti, dll)
+          // 2. HARUS punya atribut metadata resmi (Jabatan/NIP) ATAU nama panjang (minimal 2 kata yang menandakan nama riil)
+          if (!isDummyName && (hasValidMetadata || lowerName.split(' ').length >= 2)) {
+             seenNames.add(lowerName);
+             uniqueStaff.push(staff);
+          }
         }
       }
     });
