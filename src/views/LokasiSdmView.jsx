@@ -77,15 +77,16 @@ export default function LokasiSdmView({
           const isDummyName = dummyNames.includes(lowerName);
           
           // Data SDM riil (hasil import Excel) PASTI memiliki metadata tambahan (Jabatan, NIP, dsb).
-          // Ghost data biasanya cuma berisi nama saja tanpa atribut terstruktur.
+          // Diperluas agar membaca key WA/wa/noHp
           const hasValidMetadata = Boolean(
             staff.jabatan || staff.jabatan_tim || staff.NIP || staff.nip || 
-            staff.kecamatan || staff.desa || staff.status_pegawai || staff.no_hp || staff.email
+            staff.kecamatan || staff.desa || staff.status_pegawai || staff.no_hp || staff.email || 
+            staff.WA || staff.wa || staff.no_WA || staff.no_wa
           );
 
           // SYARAT DATA VALID (Untuk Menyamakan dengan Jumlah Akurat Database):
           // 1. BUKAN nama dummy test (Hadi, Budi, Siti, dll)
-          // 2. HARUS punya atribut metadata resmi (Jabatan/NIP) ATAU nama panjang (minimal 2 kata yang menandakan nama riil)
+          // 2. HARUS punya atribut metadata resmi (Jabatan/NIP/WA) ATAU nama panjang (minimal 2 kata yang menandakan nama riil)
           if (!isDummyName && (hasValidMetadata || lowerName.split(' ').length >= 2)) {
              seenNames.add(lowerName);
              uniqueStaff.push(staff);
@@ -341,9 +342,12 @@ export default function LokasiSdmView({
             const jabatan = staff.jabatan || staff.jabatan_tim || 'SDM PKH';
             const isKetua = jabatan.toLowerCase().includes('ketua tim');
             
-            // Pengambilan Nomor Telepon (Mendukung berbagai nama key dari database)
-            const phoneStr = staff.no_hp || staff.no_WA || staff.no_wa || staff.whatsapp || staff.telepon || '';
-            const phoneDisplay = phoneStr ? phoneStr : 'No. HP Belum Diisi';
+            // PENGAMBILAN NOMOR TELEPON (Menyisir semua kemungkinan nama key dari Database/Excel)
+            const rawPhone = staff.WA || staff.wa || staff.no_WA || staff.no_wa || staff.no_Wa || staff.no_hp || staff.noHp || staff.whatsapp || staff.telepon || staff.phone || '';
+            const phoneStr = String(rawPhone).trim();
+            
+            // Format link WhatsApp (Ubah awalan 0 menjadi 62)
+            const waLink = phoneStr.startsWith('0') ? `https://wa.me/62${phoneStr.substring(1)}` : `https://wa.me/${phoneStr}`;
             
             // Dapatkan Status Logika Berdasarkan Matriks Baru
             const statusLokasi = getStatusLokasiHariIni(staff);
@@ -364,17 +368,33 @@ export default function LokasiSdmView({
                       <h3 className="font-extrabold text-white text-sm sm:text-base truncate tracking-wide" title={sdmName}>
                         {sdmName}
                       </h3>
-                      <div className="flex flex-col items-start gap-1 mt-1">
+                      <div className="flex flex-col items-start gap-1.5 mt-1">
                         <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${isKetua ? 'bg-amber-950/60 border-amber-500/30 text-amber-300' : 'bg-slate-800 border-white/10 text-slate-400'}`}>
                           {jabatan}
                         </span>
-                        {/* PENAMBAHAN NOMOR TELEPON */}
-                        <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] text-slate-400 font-semibold mt-0.5" title="Nomor WhatsApp / Telepon">
-                          <FontAwesomeIcon icon={faPhone} className={phoneStr ? 'text-emerald-400' : 'text-slate-500'} />
-                          <span className={phoneStr ? 'text-slate-300' : 'text-slate-500 italic'}>
-                            {phoneDisplay}
-                          </span>
-                        </div>
+                        
+                        {/* INDIKATOR NOMOR WHATSAPP (KLIKABLE) */}
+                        {phoneStr ? (
+                          <a 
+                            href={waLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="flex items-center gap-1.5 text-[10px] text-emerald-300 hover:text-emerald-200 font-bold mt-0.5 transition-colors group/wa"
+                            title={`Hubungi ${sdmName} via WhatsApp`}
+                          >
+                            <div className="w-5 h-5 rounded-md bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center group-hover/wa:bg-emerald-500/40">
+                              <FontAwesomeIcon icon={faPhone} />
+                            </div>
+                            <span>{phoneStr}</span>
+                          </a>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-semibold mt-0.5 italic">
+                            <div className="w-5 h-5 rounded-md bg-slate-800 border border-white/5 flex items-center justify-center">
+                              <FontAwesomeIcon icon={faPhone} />
+                            </div>
+                            <span>No. WA Belum Diisi</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
