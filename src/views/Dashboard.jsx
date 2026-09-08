@@ -181,9 +181,7 @@ export default function Dashboard({
   // Group berdasarkan Tanggal (DENGAN FILTER HILANGKAN YANG TERLEWAT)
   const groupedItems = {};
   combinedItems.forEach(item => {
-    // KUNCI: Jika waktu kegiatan sudah lewat dari real-time saat ini, jangan dimasukkan (Sembunyikan)
     if (item.timestamp <= nowTimestamp) return; 
-
     if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
     groupedItems[item.sortDate].push(item);
   });
@@ -193,10 +191,7 @@ export default function Dashboard({
 
   const getCountdown = (targetTime) => {
     const diff = targetTime - nowTimestamp;
-
-    if (isNaN(targetTime)) {
-      return { isExpired: true, badgeClass: 'bg-slate-900 border-slate-700 text-slate-400' };
-    }
+    if (isNaN(targetTime)) return { isExpired: true, badgeClass: 'bg-slate-900 border-slate-700 text-slate-400' };
 
     if (diff <= 0) {
       return {
@@ -251,7 +246,6 @@ export default function Dashboard({
     return next3WorkingDates.includes(cleanDate);
   });
 
-  // Filter untuk menghilangkan Agenda Kecil yang sudah terlewat waktu
   const activeTodayAgenda = todayAgenda.filter(ag => {
     const { dateStr, timeStr } = getLocalFormat(ag.date || '');
     const tStr = ag.time || timeStr || '23:59';
@@ -264,6 +258,61 @@ export default function Dashboard({
     const tStr = ag.time || timeStr || '23:59';
     const ts = new Date(`${dateStr || todayStr}T${tStr.length === 5 ? tStr + ':00' : tStr}`).getTime();
     return ts > nowTimestamp;
+  });
+
+  // -------------------------------------------------------------
+  // MESIN KEBERADAAN SDM REAL-TIME BERDASARKAN AGENDA & JABATAN
+  // -------------------------------------------------------------
+  const keberadaanList = staffList.map(staff => {
+    const staffName = typeof staff === 'object' ? (staff.name || staff.NAMA || staff.nama) : String(staff);
+    const staffRole = typeof staff === 'object' ? (staff.jabatan || staff.JABATAN || staff.role) : '';
+    const staffId = typeof staff === 'object' ? (staff.id || staff.nik) : staffName;
+
+    const sdmAgenda = activeTodayAgenda.find(ag =>
+      (ag.sdmName && ag.sdmName.toLowerCase().includes(staffName.toLowerCase())) ||
+      (ag.staffId && ag.staffId === staffId) ||
+      (ag.assignee && ag.assignee === staffId) ||
+      (ag.title && ag.title.toLowerCase().includes(staffName.toLowerCase()))
+    );
+
+    let location = "Lapangan";
+    let statusText = "Tidak Ada Agenda / Standby";
+    let isKetuaTim = false;
+
+    if (staffRole && (staffRole.toLowerCase().includes('ketua tim') || staffRole.toLowerCase().includes('koordinator'))) {
+      isKetuaTim = true;
+    }
+    
+    // Autentikasi Jabatan Khusus berdasarkan nama profil
+    if (staffName.toLowerCase().includes('zaen syachrullah')) {
+      isKetuaTim = true;
+    }
+
+    if (sdmAgenda) {
+      if (sdmAgenda.desa) {
+         location = `Desa ${sdmAgenda.desa}`;
+         if (sdmAgenda.kecamatan) location += `, Kec. ${sdmAgenda.kecamatan}`;
+      } else if (sdmAgenda.lokasi || sdmAgenda.location) {
+         location = sdmAgenda.lokasi || sdmAgenda.location;
+      } else {
+         location = "Lokasi Agenda";
+      }
+      statusText = sdmAgenda.title || "Pelaksanaan Agenda/Supervisi";
+    } else {
+      if (isKetuaTim) {
+        location = "Sekretariat PKH";
+        statusText = "Koordinasi / Standby Sekretariat";
+      }
+    }
+
+    return {
+      id: staffId,
+      name: staffName,
+      role: staffRole || (isKetuaTim ? 'Ketua Tim Kabupaten' : 'SDM PKH'),
+      location,
+      statusText,
+      hasAgenda: !!sdmAgenda
+    };
   });
 
   // -------------------------------------------------------------
@@ -353,7 +402,6 @@ export default function Dashboard({
 
   const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
 
-  // FIX: Memastikan data todayPiket terbaca sempurna (konversi Object ke Array jika data dari Firebase berwujud Object)
   const safeTodayPiket = Array.isArray(todayPiket) 
     ? todayPiket 
     : (todayPiket ? Object.values(todayPiket) : []);
@@ -539,7 +587,6 @@ export default function Dashboard({
                   {isToday && <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse-slow"></div>}
 
                   <div className="p-4 sm:p-6 bg-slate-950/70 rounded-[24px] backdrop-blur-xl w-full">
-                    {/* --- HEADER TANGGAL CARD --- */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-700/60">
                       <div className="flex items-center gap-4">
                         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 ${isToday ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-slate-800 text-slate-400 border-slate-600'}`}>
@@ -555,7 +602,6 @@ export default function Dashboard({
                       </div>
                     </div>
 
-                    {/* --- ISI LIST KARTU --- */}
                     <div className="space-y-4 sm:space-y-5 w-full">
                       {items.map((item, idx) => {
                         if (item.itemType === 'task') {
@@ -701,9 +747,54 @@ export default function Dashboard({
         </div>
       </div>
 
+      {/* SUB MENU BARU: PETA KEBERADAAN SDM REAL-TIME */}
+      <div className="space-y-4 sm:space-y-6 pt-2 relative z-10 w-full mt-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white border-b border-white/10 pb-3">
+          <div className="flex items-center gap-3">
+            <FontAwesomeIcon icon={faMapMarkerAlt} className="text-xl sm:text-2xl text-blue-400 drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+            <h2 className="text-lg sm:text-2xl font-black tracking-wide uppercase drop-shadow-lg text-transparent bg-clip-text bg-gradient-to-r from-blue-100 to-blue-400">
+              Informasi Keberadaan SDM
+            </h2>
+          </div>
+          <span className="text-xs font-bold text-blue-300 bg-blue-900/50 px-3 py-1.5 rounded-xl border border-blue-500/30 flex items-center gap-2 w-fit shadow-inner">
+            <FontAwesomeIcon icon={faGlobe} className="animate-pulse" />
+            Real-Time Tracking ({keberadaanList.length} SDM)
+          </span>
+        </div>
+
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-blue-500/30 backdrop-blur-xl shadow-3d-glass hover:border-blue-400/60 transition-all duration-300">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+            {keberadaanList.map((item, idx) => (
+              <div key={idx} className="p-3.5 rounded-2xl bg-slate-950/80 border border-white/10 flex flex-col gap-2 hover:border-blue-500/40 transition-all duration-300 group">
+                <span className="font-bold text-slate-200 text-xs uppercase tracking-wide truncate group-hover:text-blue-300 transition-colors">
+                  {item.name}
+                </span>
+                <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                  <span className={`px-2.5 py-1 rounded-md flex items-center gap-1.5 w-full ${
+                    item.hasAgenda 
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' 
+                      : (item.location === 'Sekretariat PKH' 
+                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.2)]' 
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(52,211,153,0.2)]'
+                        )
+                  }`}>
+                    <FontAwesomeIcon icon={faMapMarkerAlt} className={item.hasAgenda ? 'animate-bounce' : ''} />
+                    <span className="truncate">{item.location}</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[9px] text-slate-400">
+                  <FontAwesomeIcon icon={faInfoCircle} />
+                  <span className="truncate">{item.statusText}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* DUAL SECTION: PAPAN PENGUMUMAN & PAPAN CATATAN SDM */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 pt-6 border-t border-white/10 mt-6">
-        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-amber-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-amber-500/30 backdrop-blur-xl shadow-3d-glass space-y-4 hover:border-amber-400/60 transition-all duration-300">
           <div className="flex justify-between items-center flex-wrap gap-2">
             <div className="flex items-center gap-2 text-amber-400">
               <FontAwesomeIcon icon={faBullhorn} className="text-lg sm:text-xl" />
@@ -740,7 +831,7 @@ export default function Dashboard({
           </div>
         </div>
 
-        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-indigo-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-indigo-500/30 backdrop-blur-xl shadow-3d-glass space-y-4 hover:border-indigo-400/60 transition-all duration-300">
           <div className="flex justify-between items-center flex-wrap gap-2">
             <div className="flex items-center gap-2 text-indigo-400">
               <FontAwesomeIcon icon={faStickyNote} className="text-lg sm:text-xl" />
@@ -780,19 +871,45 @@ export default function Dashboard({
 
       {/* STATUS CARDS MINIMALIS (PIKET, AGENDA KECIL, & SWAP) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
+        
+        {/* KARTU PIKET - REALTIME BERDASARKAN WAKTU BERJALAN */}
         <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-emerald-400/60">
-          <div className="flex items-center gap-2.5 mb-3 sm:mb-4 text-emerald-400 shrink-0">
-            <FontAwesomeIcon icon={faUserShield} className="text-lg sm:text-xl" />
-            <h3 className="font-bold text-base sm:text-lg text-white">Piket Hari Ini</h3>
+          <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
+            <div className="flex items-center gap-2.5 text-emerald-400">
+              <FontAwesomeIcon icon={faUserShield} className="text-lg sm:text-xl" />
+              <h3 className="font-bold text-base sm:text-lg text-white">Piket Hari Ini</h3>
+            </div>
+            <span className="text-[9px] font-bold text-emerald-300 bg-emerald-950/80 px-2 py-1 rounded border border-emerald-500/30 flex items-center gap-1">
+              <FontAwesomeIcon icon={faClock} /> Status Live
+            </span>
           </div>
           <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
             {safeTodayPiket.length > 0 ? (
               safeTodayPiket.map((p, idx) => {
                 const staffId = typeof p === 'object' && p !== null ? (p.staffId || p.id || p.name || p.NAMA || p.nama || JSON.stringify(p)) : p;
+                
+                // Logika Waktu Berjalan Real-time untuk Status Piket
+                const currentHour = dateObj.getHours();
+                const isDone = currentHour >= 16; 
+                const isActive = currentHour >= 8 && !isDone;
+                
                 return (
                   <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 flex justify-between items-center hover:bg-emerald-500/10 transition-colors">
-                    <span className="font-semibold text-slate-100 text-xs sm:text-sm truncate">{getStaffName(staffId)}</span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399] shrink-0"></span>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="font-semibold text-slate-100 text-xs sm:text-sm truncate">{getStaffName(staffId)}</span>
+                      <span className={`text-[9px] font-bold uppercase tracking-wider ${isDone ? 'text-slate-400' : (isActive ? 'text-emerald-400' : 'text-amber-400')}`}>
+                        {isDone ? 'Selesai Tugas' : (isActive ? 'Sedang Bertugas' : 'Menunggu Jam Kerja')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isActive && (
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        </span>
+                      )}
+                      {isDone && <FontAwesomeIcon icon={faCheckCircle} className="text-slate-500" />}
+                    </div>
                   </div>
                 );
               })
