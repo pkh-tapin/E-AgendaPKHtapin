@@ -10,6 +10,7 @@ import TimelineView from './views/TimelineView';
 import CatatanView from './views/CatatanView';
 import PengaduanView from './views/Pengaduan';
 import RekapKegiatan from './views/RekapKegiatan'; // Komponen baru ditambahkan di sini
+import LokasiSdmView from './views/LokasiSdmView'; // Komponen Lokasi SDM ditambahkan
 import GlassLoader from './components/GlassLoader';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
@@ -32,7 +33,8 @@ import {
   faKey,
   faUserCheck,
   faLock,
-  faTable // Icon baru ditambahkan di sini
+  faTable, // Icon baru ditambahkan di sini
+  faMapMarkerAlt // Icon untuk menu lokasi
 } from '@fortawesome/free-solid-svg-icons';
 
 // =============================================================================
@@ -94,13 +96,13 @@ function MainLayout() {
   // Daftar Tab Yang Diperbolehkan Menurut Role
   const getAllowedTabs = (role) => {
     if (role === 'admin') {
-      return ['dashboard', 'catatan', 'piket', 'agenda', 'timeline', 'tugas', 'pengaduan', 'sdm', 'rekap'];
+      return ['dashboard', 'lokasi', 'catatan', 'piket', 'agenda', 'timeline', 'tugas', 'pengaduan', 'sdm', 'rekap'];
     }
     if (role === 'sdm') {
-      return ['dashboard', 'piket', 'agenda', 'timeline', 'pengaduan', 'rekap'];
+      return ['dashboard', 'lokasi', 'piket', 'agenda', 'timeline', 'pengaduan', 'rekap'];
     }
     // Default Publik
-    return ['dashboard', 'piket', 'timeline', 'rekap'];
+    return ['dashboard', 'lokasi', 'piket', 'timeline', 'rekap'];
   };
 
   // Simpan state activeTab & userRole ke LocalStorage + Validasi Akses Tab
@@ -272,6 +274,7 @@ function MainLayout() {
   // BUILD NAV MENU BERDASARKAN ROLE
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: faThLarge },
+    { id: 'lokasi', label: 'Lokasi SDM', icon: faMapMarkerAlt },
     ...(isAdmin ? [{ id: 'catatan', label: 'Catatan & Info', icon: faStickyNote }] : []),
     { id: 'piket', label: 'Jadwal Piket', icon: faCalendarAlt },
     ...(isSdm || isAdmin ? [{ id: 'agenda', label: 'Agenda Kerja', icon: faClipboardList }] : []),
@@ -288,6 +291,7 @@ function MainLayout() {
       return [
         { id: 'dashboard', label: 'Beranda', icon: faThLarge },
         { id: 'piket', label: 'Piket', icon: faCalendarAlt },
+        { id: 'lokasi', label: 'Lokasi', icon: faMapMarkerAlt },
         { id: 'agenda', label: 'Agenda', icon: faClipboardList },
         { id: 'sdm', label: 'SDM', icon: faUsers }
       ];
@@ -296,6 +300,7 @@ function MainLayout() {
       return [
         { id: 'dashboard', label: 'Beranda', icon: faThLarge },
         { id: 'piket', label: 'Piket', icon: faCalendarAlt },
+        { id: 'lokasi', label: 'Lokasi', icon: faMapMarkerAlt },
         { id: 'agenda', label: 'Agenda', icon: faClipboardList },
         { id: 'pengaduan', label: 'Aduan', icon: faHeadset }
       ];
@@ -304,6 +309,7 @@ function MainLayout() {
     return [
       { id: 'dashboard', label: 'Beranda', icon: faThLarge },
       { id: 'piket', label: 'Piket', icon: faCalendarAlt },
+      { id: 'lokasi', label: 'Lokasi', icon: faMapMarkerAlt },
       { id: 'timeline', label: 'Timeline', icon: faStream }
     ];
   };
@@ -535,6 +541,17 @@ function MainLayout() {
             isAdmin={isAdmin}
             isSdm={isSdm}
             userRole={userRole}
+          />
+        )}
+
+        {/* TAMPILAN MENU LOKASI SDM BESERTA DATA LOGIKA HARI INI DAN 7 HARI KEDEPAN */}
+        {activeTab === 'lokasi' && (
+          <LokasiSdmView
+            staffList={staffList}
+            todayPiket={todayPiket}
+            todayAgenda={todayAgenda}
+            agendas={agendas}
+            schedules={schedules}
           />
         )}
 
