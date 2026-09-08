@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { db, ref, onValue } from '../firebase'; // Import Firebase ditambahkan
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faMapMarkerAlt, 
@@ -15,8 +16,21 @@ import {
   faClipboardList,
   faExclamationCircle,
   faMapPin,
-  faPhone // Icon tambahan untuk Nomor Telepon
+  faPhone,
+  faFilter // Icon tambahan untuk Smart Filter
 } from '@fortawesome/free-solid-svg-icons';
+
+// HELPER PARSING ARRAY DESA SDM (Fungsi Baru untuk Smart Filter)
+const parseDesaArray = (rawDesa) => {
+  if (!rawDesa) return [];
+  let list = [];
+  if (Array.isArray(rawDesa)) list = rawDesa.map(String);
+  else if (typeof rawDesa === 'object' && rawDesa !== null) list = Object.values(rawDesa).map(String);
+  else if (typeof rawDesa === 'string' && rawDesa.trim() && rawDesa !== '-') {
+    list = rawDesa.split(',').map((d) => d.trim());
+  }
+  return list.map(d => d.replace(/^Desa\s*/i, '').trim()).filter(d => d && d !== '-');
+};
 
 export default function LokasiSdmView({ 
   staffList = [], 
@@ -27,11 +41,28 @@ export default function LokasiSdmView({
 }) {
   
   // ---------------------------------------------------------------------------
-  // 1. STATE & FILTERING (PENCARIAN REAL-TIME)
+  // 1. STATE & FILTERING (PENCARIAN REAL-TIME & SMART FILTER)
   // ---------------------------------------------------------------------------
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterKecamatan, setFilterKecamatan] = useState('');
+  const [filterDesa, setFilterDesa] = useState('');
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Master Wilayah Dinamis dari Firebase Database (config/wilayah)
+  const [wilayahData, setWilayahData] = useState({});
+
+  // Fetch Master Wilayah dari Realtime Database
+  useEffect(() => {
+    const wilayahRef = ref(db, 'config/wilayah');
+    const unsubscribe = onValue(wilayahRef, (snapshot) => {
+      const data = snapshot.val();
+      setWilayahData(data || {});
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const allKecamatanKeys = Object.keys(wilayahData);
 
   // Jam Digital Realtime
   useEffect(() => {
@@ -104,7 +135,24 @@ export default function LokasiSdmView({
     const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').toLowerCase();
     const sdmJabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const search = searchTerm.toLowerCase();
-    return sdmName.includes(search) || sdmJabatan.includes(search);
+
+    // Mapping atribut Kecamatan dan Desa dari Database SDM
+    const staffKec = (staff.kecamatan || staff['KECAMATAN (SK)'] || staff['KECAMATAN (DOM)'] || '').toLowerCase();
+    
+    // Logika Pencarian Teks
+    const matchSearch = sdmName.includes(search) || sdmJabatan.includes(search);
+    
+    // Logika Filter Kecamatan
+    const matchKec = !filterKecamatan || staffKec === filterKecamatan.toLowerCase();
+    
+    // Logika Filter Desa
+    let matchDesa = true;
+    if (filterDesa) {
+       const parsedDesa = parseDesaArray(staff.desa).map(d => d.toLowerCase());
+       matchDesa = parsedDesa.includes(filterDesa.toLowerCase());
+    }
+
+    return matchSearch && matchKec && matchDesa;
   });
 
   // ---------------------------------------------------------------------------
@@ -295,42 +343,81 @@ export default function LokasiSdmView({
         </div>
       </div>
 
-      {/* FILTER PENCARIAN & STATISTIK */}
-      <div className="flex flex-col lg:flex-row justify-between items-center gap-4 relative z-10 w-full">
-        <div className="relative w-full lg:w-96 group">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-400 transition-colors">
-            <FontAwesomeIcon icon={faSearch} />
+      {/* SMART FILTER PENCARIAN LOKASI & STATISTIK */}
+      <div className="p-4 sm:p-5 rounded-3xl bg-slate-900/80 border border-indigo-500/30 backdrop-blur-xl space-y-4 relative z-10 w-full">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
+          
+          <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs sm:text-sm">
+            <FontAwesomeIcon icon={faFilter} />
+            <span>Smart Filter Lokasi Wilayah (Database SDM)</span>
           </div>
-          <input
-            type="text"
-            placeholder="Cari nama atau jabatan SDM..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-11 pr-4 py-3.5 bg-slate-900/80 border border-white/15 rounded-2xl text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 transition-all backdrop-blur-xl shadow-lg"
-          />
-          {searchTerm && (
-            <button 
-              onClick={() => setSearchTerm('')}
-              className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-white cursor-pointer"
-            >
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-          )}
+
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
+            <span className="px-3 py-1.5 bg-slate-900/80 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2 shadow-sm">
+               <FontAwesomeIcon icon={faUser} className="text-slate-500" />
+               Total Data Valid: {filteredStaffList.length} SDM
+            </span>
+            <span className="px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 rounded-xl text-xs font-bold text-indigo-300 flex items-center gap-2 shadow-sm">
+               <FontAwesomeIcon icon={faBuilding} className="text-indigo-400" />
+               Sekretariat
+            </span>
+            <span className="px-3 py-1.5 bg-amber-900/40 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-300 flex items-center gap-2 shadow-sm">
+               <FontAwesomeIcon icon={faLeaf} className="text-amber-400" />
+               Lapangan / Desa
+            </span>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
-          <span className="px-3 py-1.5 bg-slate-900/80 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2 shadow-sm">
-             <FontAwesomeIcon icon={faUser} className="text-slate-500" />
-             Total Data Valid: {filteredStaffList.length} SDM
-          </span>
-          <span className="px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 rounded-xl text-xs font-bold text-indigo-300 flex items-center gap-2 shadow-sm">
-             <FontAwesomeIcon icon={faBuilding} className="text-indigo-400" />
-             Sekretariat
-          </span>
-          <span className="px-3 py-1.5 bg-amber-900/40 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-300 flex items-center gap-2 shadow-sm">
-             <FontAwesomeIcon icon={faLeaf} className="text-amber-400" />
-             Lapangan / Desa
-          </span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
+          {/* Search Input (Dari Blueprint) */}
+          <div className="relative group w-full">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-400 transition-colors">
+              <FontAwesomeIcon icon={faSearch} />
+            </div>
+            <input
+              type="text"
+              placeholder="Cari nama atau jabatan SDM..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-11 pr-4 py-3 bg-slate-950/80 border border-white/15 rounded-2xl text-xs sm:text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 transition-all shadow-inner"
+            />
+            {searchTerm && (
+              <button 
+                onClick={() => setSearchTerm('')}
+                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-white cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+            )}
+          </div>
+
+          {/* Filter Kecamatan */}
+          <select
+            value={filterKecamatan}
+            onChange={(e) => {
+              setFilterKecamatan(e.target.value);
+              setFilterDesa(''); // Reset Desa jika kecamatan diganti
+            }}
+            className="w-full px-4 py-3 rounded-2xl bg-slate-950/80 border border-white/15 text-white text-xs sm:text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 cursor-pointer shadow-inner transition-all appearance-none"
+          >
+            <option value="" className="text-slate-400">-- Semua Kecamatan --</option>
+            {allKecamatanKeys.map((kec) => (
+              <option key={kec} value={kec}>Kec. {kec}</option>
+            ))}
+          </select>
+
+          {/* Filter Desa */}
+          <select
+            value={filterDesa}
+            onChange={(e) => setFilterDesa(e.target.value)}
+            disabled={!filterKecamatan}
+            className="w-full px-4 py-3 rounded-2xl bg-slate-950/80 border border-white/15 text-white text-xs sm:text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all appearance-none"
+          >
+            <option value="" className="text-slate-400">-- Semua Desa / Kelurahan --</option>
+            {filterKecamatan && (wilayahData[filterKecamatan] || []).map((des) => (
+              <option key={des} value={des}>Desa {des}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -429,8 +516,8 @@ export default function LokasiSdmView({
       ) : (
         <div className="w-full py-20 rounded-3xl bg-slate-900/50 border-2 border-dashed border-white/10 flex flex-col items-center justify-center text-slate-400 relative z-10 backdrop-blur-md">
           <FontAwesomeIcon icon={faSearch} className="text-4xl mb-4 text-slate-600" />
-          <p className="text-sm font-semibold">Tidak ada SDM valid yang cocok dengan pencarian "{searchTerm}".</p>
-          <button onClick={() => setSearchTerm('')} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 underline font-bold cursor-pointer">Bersihkan Pencarian</button>
+          <p className="text-sm font-semibold">Tidak ada SDM valid yang cocok dengan pencarian atau filter.</p>
+          <button onClick={() => { setSearchTerm(''); setFilterKecamatan(''); setFilterDesa(''); }} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 underline font-bold cursor-pointer">Bersihkan Pencarian</button>
         </div>
       )}
 
