@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { db, ref, onValue } from '../firebase'; // Import Firebase ditambahkan
+import { db, ref, onValue, set } from '../firebase';
+import { useToast } from '../context/ToastContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faMapMarkerAlt, 
@@ -17,52 +18,47 @@ import {
   faExclamationCircle,
   faMapPin,
   faPhone,
-  faFilter // Icon tambahan untuk Smart Filter
+  faEdit,
+  faSave,
+  faUndo
 } from '@fortawesome/free-solid-svg-icons';
-
-// HELPER PARSING ARRAY DESA SDM (Fungsi Baru untuk Smart Filter)
-const parseDesaArray = (rawDesa) => {
-  if (!rawDesa) return [];
-  let list = [];
-  if (Array.isArray(rawDesa)) list = rawDesa.map(String);
-  else if (typeof rawDesa === 'object' && rawDesa !== null) list = Object.values(rawDesa).map(String);
-  else if (typeof rawDesa === 'string' && rawDesa.trim() && rawDesa !== '-') {
-    list = rawDesa.split(',').map((d) => d.trim());
-  }
-  return list.map(d => d.replace(/^Desa\s*/i, '').trim()).filter(d => d && d !== '-');
-};
 
 export default function LokasiSdmView({ 
   staffList = [], 
   todayPiket = [], // (Fallback prop)
   todayAgenda = [], // (Fallback prop)
   agendas = [],      // Digunakan untuk pelacakan agenda akurat
-  schedules = {}     // Digunakan untuk pelacakan piket akurat
+  schedules = {},    // Digunakan untuk pelacakan piket akurat
+  isAdmin = false,
+  currentUser = null, // Tambahan prop untuk deteksi user login
+  user = null         // Fallback jika prop auth bernama 'user'
 }) {
   
+  // Deteksi user yang sedang aktif
+  const activeUser = currentUser || user;
+
+  // Integrasi Toast Notification
+  const toastContext = useToast();
+  const showToast = toastContext ? toastContext.showToast : (msg) => console.log(msg);
+  
   // ---------------------------------------------------------------------------
-  // 1. STATE & FILTERING (PENCARIAN REAL-TIME & SMART FILTER)
+  // 1. STATE & FILTERING (PENCARIAN REAL-TIME) & STATE EDIT MANUAL
   // ---------------------------------------------------------------------------
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterKecamatan, setFilterKecamatan] = useState('');
-  const [filterDesa, setFilterDesa] = useState('');
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Master Wilayah Dinamis dari Firebase Database (config/wilayah)
+  // State Ekstra untuk Edit Lokasi Manual (Sesuai Blueprint Upgrade)
   const [wilayahData, setWilayahData] = useState({});
-
-  // Fetch Master Wilayah dari Realtime Database
-  useEffect(() => {
-    const wilayahRef = ref(db, 'config/wilayah');
-    const unsubscribe = onValue(wilayahRef, (snapshot) => {
-      const data = snapshot.val();
-      setWilayahData(data || {});
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const allKecamatanKeys = Object.keys(wilayahData);
+  const [manualLocations, setManualLocations] = useState({});
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [editForm, setEditForm] = useState({
+    tipe: 'lapangan',
+    kecamatan: '',
+    desa: '',
+    keterangan: ''
+  });
 
   // Jam Digital Realtime
   useEffect(() => {
@@ -86,7 +82,29 @@ export default function LokasiSdmView({
   });
 
   // ---------------------------------------------------------------------------
-  // 2. PEMBERSIHAN DATA SDM (MENCEGAH GHOST DATA, DUMMY, & HAPUS DUPLIKAT)
+  // 2. FETCH DATABASE (WILAYAH SMART FILTER & LOKASI MANUAL HARI INI)
+  // ---------------------------------------------------------------------------
+  
+  // Fetch Master Wilayah dari Realtime Database untuk Dropdown
+  useEffect(() => {
+    const wilayahRef = ref(db, 'config/wilayah');
+    const unsubscribe = onValue(wilayahRef, (snapshot) => {
+      setWilayahData(snapshot.val() || {});
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch Overrides Lokasi Manual Hari Ini
+  useEffect(() => {
+    const locRef = ref(db, `lokasi_manual/${todayStrRealtime}`);
+    const unsubscribe = onValue(locRef, (snapshot) => {
+      setManualLocations(snapshot.val() || {});
+    });
+    return () => unsubscribe();
+  }, [todayStrRealtime]);
+
+  // ---------------------------------------------------------------------------
+  // 3. PEMBERSIHAN DATA SDM (MENCEGAH GHOST DATA, DUMMY, & HAPUS DUPLIKAT)
   // ---------------------------------------------------------------------------
   const getValidStaffList = () => {
     const uniqueStaff = [];
@@ -135,34 +153,37 @@ export default function LokasiSdmView({
     const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').toLowerCase();
     const sdmJabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const search = searchTerm.toLowerCase();
-
-    // Mapping atribut Kecamatan dan Desa dari Database SDM
-    const staffKec = (staff.kecamatan || staff['KECAMATAN (SK)'] || staff['KECAMATAN (DOM)'] || '').toLowerCase();
-    
-    // Logika Pencarian Teks
-    const matchSearch = sdmName.includes(search) || sdmJabatan.includes(search);
-    
-    // Logika Filter Kecamatan
-    const matchKec = !filterKecamatan || staffKec === filterKecamatan.toLowerCase();
-    
-    // Logika Filter Desa
-    let matchDesa = true;
-    if (filterDesa) {
-       const parsedDesa = parseDesaArray(staff.desa).map(d => d.toLowerCase());
-       matchDesa = parsedDesa.includes(filterDesa.toLowerCase());
-    }
-
-    return matchSearch && matchKec && matchDesa;
+    return sdmName.includes(search) || sdmJabatan.includes(search);
   });
 
   // ---------------------------------------------------------------------------
-  // 3. LOGIKA UTAMA: PENENTUAN LOKASI HARI INI (FIXED MATCHING LOGIC)
+  // 4. LOGIKA UTAMA: PENENTUAN LOKASI HARI INI (FIXED MATCHING LOGIC)
   // ---------------------------------------------------------------------------
   const getStatusLokasiHariIni = (staff) => {
     const staffId = String(staff.id || '').trim();
     const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim().toLowerCase();
     const jabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const isKetuaKabupaten = jabatan.includes('ketua tim kabupaten');
+
+    // CEK PRIORITAS 0: APAKAH ADA OVERRIDE EDIT MANUAL HARI INI?
+    if (manualLocations[staffId]) {
+      const manual = manualLocations[staffId];
+      const isSekretariat = manual.tipe === 'sekretariat';
+      return {
+        teks: isSekretariat ? 'Di Sekretariat PKH' : 'Di Lapangan / Desa',
+        subTeks: isSekretariat 
+          ? (manual.keterangan || 'Tugas Sekretariat (Diedit Manual)') 
+          : `Desa ${manual.desa || '-'}, Kec. ${manual.kecamatan || '-'} ${manual.keterangan ? `(${manual.keterangan})` : ''}`,
+        tipe: manual.tipe,
+        icon: isSekretariat ? faBuilding : faMapMarkerAlt,
+        badgeBg: isSekretariat ? 'bg-indigo-500/20' : 'bg-emerald-500/20',
+        cardBorder: isSekretariat ? 'border-indigo-500/50' : 'border-emerald-500/50',
+        warnaTeks: isSekretariat ? 'text-indigo-300' : 'text-emerald-300',
+        warnaIcon: isSekretariat ? 'text-indigo-400' : 'text-emerald-400',
+        gradient: isSekretariat ? 'from-indigo-950/40 to-slate-900/80' : 'from-emerald-950/40 to-slate-900/80',
+        isManual: true
+      };
+    }
 
     // MENDETEKSI PIKET (Mencocokkan ID ataupun NAMA)
     const isPiket = realtimeTodayPiket.some(p => {
@@ -195,7 +216,8 @@ export default function LokasiSdmView({
         cardBorder: 'border-indigo-500/50',
         warnaTeks: 'text-indigo-300',
         warnaIcon: 'text-indigo-400',
-        gradient: 'from-indigo-950/40 to-slate-900/80'
+        gradient: 'from-indigo-950/40 to-slate-900/80',
+        isManual: false
       };
     }
 
@@ -210,7 +232,8 @@ export default function LokasiSdmView({
         cardBorder: 'border-emerald-500/50',
         warnaTeks: 'text-emerald-300',
         warnaIcon: 'text-emerald-400',
-        gradient: 'from-emerald-950/40 to-slate-900/80'
+        gradient: 'from-emerald-950/40 to-slate-900/80',
+        isManual: false
       };
     }
 
@@ -225,7 +248,8 @@ export default function LokasiSdmView({
         cardBorder: 'border-indigo-500/30',
         warnaTeks: 'text-indigo-300',
         warnaIcon: 'text-indigo-400',
-        gradient: 'from-slate-900 to-indigo-950/30'
+        gradient: 'from-slate-900 to-indigo-950/30',
+        isManual: false
       };
     } else {
       return {
@@ -237,14 +261,72 @@ export default function LokasiSdmView({
         cardBorder: 'border-amber-500/30',
         warnaTeks: 'text-amber-300',
         warnaIcon: 'text-amber-400',
-        gradient: 'from-slate-900 to-amber-950/30'
+        gradient: 'from-slate-900 to-amber-950/30',
+        isManual: false
       };
     }
   };
 
   // ---------------------------------------------------------------------------
-  // 4. LOGIKA FORECAST (PRAKIRAAN) 7 HARI KEDEPAN 
+  // 5. HANDLER EDIT LOKASI MANUAL & FORECAST (PRAKIRAAN) 7 HARI KEDEPAN 
   // ---------------------------------------------------------------------------
+  const handleOpenEdit = (staff) => {
+    setEditingStaff(staff);
+    const staffId = String(staff.id || '').trim();
+    const existing = manualLocations[staffId];
+    
+    if (existing) {
+      setEditForm({
+        tipe: existing.tipe || 'lapangan',
+        kecamatan: existing.kecamatan || '',
+        desa: existing.desa || '',
+        keterangan: existing.keterangan || ''
+      });
+    } else {
+      setEditForm({
+        tipe: 'lapangan',
+        kecamatan: '',
+        desa: '',
+        keterangan: ''
+      });
+    }
+    setEditModalOpen(true);
+  };
+
+  const handleSaveLocation = async (e) => {
+    e.preventDefault();
+    if (!editingStaff) return;
+    const staffId = String(editingStaff.id || '').trim();
+    
+    try {
+      await set(ref(db, `lokasi_manual/${todayStrRealtime}/${staffId}`), {
+        tipe: editForm.tipe,
+        kecamatan: editForm.tipe === 'lapangan' ? editForm.kecamatan : '',
+        desa: editForm.tipe === 'lapangan' ? editForm.desa : '',
+        keterangan: editForm.keterangan,
+        updatedAt: new Date().toISOString()
+      });
+      showToast('Lokasi manual berhasil diperbarui!', 'success');
+      setEditModalOpen(false);
+    } catch (error) {
+      console.error(error);
+      showToast('Gagal memperbarui lokasi!', 'error');
+    }
+  };
+
+  const handleResetLocation = async () => {
+    if (!editingStaff) return;
+    const staffId = String(editingStaff.id || '').trim();
+    try {
+      await set(ref(db, `lokasi_manual/${todayStrRealtime}/${staffId}`), null);
+      showToast('Lokasi direset mengikuti jadwal sistem!', 'info');
+      setEditModalOpen(false);
+    } catch (error) {
+      console.error(error);
+      showToast('Gagal mereset lokasi!', 'error');
+    }
+  };
+
   const generate7DaysForecast = (staff) => {
     const staffId = String(staff.id || '').trim();
     const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim().toLowerCase();
@@ -309,7 +391,7 @@ export default function LokasiSdmView({
   };
 
   // ---------------------------------------------------------------------------
-  // 5. RENDER ENGINE (UI)
+  // 6. RENDER ENGINE (UI)
   // ---------------------------------------------------------------------------
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10">
@@ -343,81 +425,42 @@ export default function LokasiSdmView({
         </div>
       </div>
 
-      {/* SMART FILTER PENCARIAN LOKASI & STATISTIK */}
-      <div className="p-4 sm:p-5 rounded-3xl bg-slate-900/80 border border-indigo-500/30 backdrop-blur-xl space-y-4 relative z-10 w-full">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
-          
-          <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs sm:text-sm">
-            <FontAwesomeIcon icon={faFilter} />
-            <span>Smart Filter Lokasi Wilayah (Database SDM)</span>
+      {/* FILTER PENCARIAN & STATISTIK */}
+      <div className="flex flex-col lg:flex-row justify-between items-center gap-4 relative z-10 w-full">
+        <div className="relative w-full lg:w-96 group">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-400 transition-colors">
+            <FontAwesomeIcon icon={faSearch} />
           </div>
-
-          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
-            <span className="px-3 py-1.5 bg-slate-900/80 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2 shadow-sm">
-               <FontAwesomeIcon icon={faUser} className="text-slate-500" />
-               Total Data Valid: {filteredStaffList.length} SDM
-            </span>
-            <span className="px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 rounded-xl text-xs font-bold text-indigo-300 flex items-center gap-2 shadow-sm">
-               <FontAwesomeIcon icon={faBuilding} className="text-indigo-400" />
-               Sekretariat
-            </span>
-            <span className="px-3 py-1.5 bg-amber-900/40 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-300 flex items-center gap-2 shadow-sm">
-               <FontAwesomeIcon icon={faLeaf} className="text-amber-400" />
-               Lapangan / Desa
-            </span>
-          </div>
+          <input
+            type="text"
+            placeholder="Cari nama atau jabatan SDM..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-11 pr-4 py-3.5 bg-slate-900/80 border border-white/15 rounded-2xl text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 transition-all backdrop-blur-xl shadow-lg"
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => setSearchTerm('')}
+              className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-white cursor-pointer"
+            >
+              <FontAwesomeIcon icon={faTimes} />
+            </button>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
-          {/* Search Input (Dari Blueprint) */}
-          <div className="relative group w-full">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-400 transition-colors">
-              <FontAwesomeIcon icon={faSearch} />
-            </div>
-            <input
-              type="text"
-              placeholder="Cari nama atau jabatan SDM..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-slate-950/80 border border-white/15 rounded-2xl text-xs sm:text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 transition-all shadow-inner"
-            />
-            {searchTerm && (
-              <button 
-                onClick={() => setSearchTerm('')}
-                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-white cursor-pointer"
-              >
-                <FontAwesomeIcon icon={faTimes} />
-              </button>
-            )}
-          </div>
-
-          {/* Filter Kecamatan */}
-          <select
-            value={filterKecamatan}
-            onChange={(e) => {
-              setFilterKecamatan(e.target.value);
-              setFilterDesa(''); // Reset Desa jika kecamatan diganti
-            }}
-            className="w-full px-4 py-3 rounded-2xl bg-slate-950/80 border border-white/15 text-white text-xs sm:text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 cursor-pointer shadow-inner transition-all appearance-none"
-          >
-            <option value="" className="text-slate-400">-- Semua Kecamatan --</option>
-            {allKecamatanKeys.map((kec) => (
-              <option key={kec} value={kec}>Kec. {kec}</option>
-            ))}
-          </select>
-
-          {/* Filter Desa */}
-          <select
-            value={filterDesa}
-            onChange={(e) => setFilterDesa(e.target.value)}
-            disabled={!filterKecamatan}
-            className="w-full px-4 py-3 rounded-2xl bg-slate-950/80 border border-white/15 text-white text-xs sm:text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-inner transition-all appearance-none"
-          >
-            <option value="" className="text-slate-400">-- Semua Desa / Kelurahan --</option>
-            {filterKecamatan && (wilayahData[filterKecamatan] || []).map((des) => (
-              <option key={des} value={des}>Desa {des}</option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
+          <span className="px-3 py-1.5 bg-slate-900/80 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2 shadow-sm">
+             <FontAwesomeIcon icon={faUser} className="text-slate-500" />
+             Total Data Valid: {filteredStaffList.length} SDM
+          </span>
+          <span className="px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 rounded-xl text-xs font-bold text-indigo-300 flex items-center gap-2 shadow-sm">
+             <FontAwesomeIcon icon={faBuilding} className="text-indigo-400" />
+             Sekretariat
+          </span>
+          <span className="px-3 py-1.5 bg-amber-900/40 border border-amber-500/30 rounded-xl text-xs font-bold text-amber-300 flex items-center gap-2 shadow-sm">
+             <FontAwesomeIcon icon={faLeaf} className="text-amber-400" />
+             Lapangan / Desa
+          </span>
         </div>
       </div>
 
@@ -436,15 +479,22 @@ export default function LokasiSdmView({
             // Format link WhatsApp (Ubah awalan 0 menjadi 62)
             const waLink = phoneStr.startsWith('0') ? `https://wa.me/62${phoneStr.substring(1)}` : `https://wa.me/${phoneStr}`;
             
-            // Dapatkan Status Logika Berdasarkan Matriks Baru
+            // Dapatkan Status Logika Berdasarkan Matriks Baru + Override Edit
             const statusLokasi = getStatusLokasiHariIni(staff);
+
+            // Hak Akses Edit: Hanya Admin ATAU Pemilik Akun (User Login)
+            const isSelf = activeUser && (
+              String(activeUser.id) === String(staff.id) || 
+              String(activeUser.name || '').toLowerCase() === sdmName.toLowerCase()
+            );
+            const canEdit = isAdmin || isSelf;
 
             return (
               <div 
                 key={idx} 
                 className={`flex flex-col justify-between p-1 rounded-3xl bg-gradient-to-br ${statusLokasi.gradient} shadow-xl hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-300 group border ${statusLokasi.cardBorder}`}
               >
-                <div className="p-5 rounded-[22px] bg-slate-950/70 backdrop-blur-xl h-full flex flex-col justify-between">
+                <div className="p-5 rounded-[22px] bg-slate-950/70 backdrop-blur-xl h-full flex flex-col justify-between relative">
                   
                   {/* Bagian Atas: Profil */}
                   <div className="flex items-start gap-4 mb-5 border-b border-white/10 pb-4">
@@ -488,6 +538,25 @@ export default function LokasiSdmView({
 
                   {/* Bagian Tengah: Status Lokasi Hari Ini */}
                   <div className="flex flex-col items-center justify-center p-4 rounded-xl border border-white/5 bg-black/20 mb-5 relative overflow-hidden group-hover:bg-black/40 transition-colors">
+                    
+                    {/* INDIKATOR LOKASI MANUAL */}
+                    {statusLokasi.isManual && (
+                      <span className="absolute top-2 right-2 flex items-center gap-1 text-[9px] text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20" title="Ditetapkan Manual Hari Ini">
+                        <FontAwesomeIcon icon={faCheckCircle} /> Manual
+                      </span>
+                    )}
+
+                    {/* TOMBOL EDIT LOKASI UNTUK SDM & ADMIN */}
+                    {canEdit && (
+                      <button
+                        onClick={() => handleOpenEdit(staff)}
+                        className="absolute top-2 left-2 flex items-center gap-1 text-[9px] text-indigo-300 hover:text-white font-bold bg-indigo-500/20 hover:bg-indigo-500/40 px-1.5 py-0.5 rounded border border-indigo-500/30 transition-colors cursor-pointer"
+                        title="Edit Rincian Lokasi Hari Ini"
+                      >
+                        <FontAwesomeIcon icon={faEdit} /> Edit
+                      </button>
+                    )}
+
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 shadow-lg ${statusLokasi.badgeBg} border ${statusLokasi.cardBorder}`}>
                        <FontAwesomeIcon icon={statusLokasi.icon} className={`text-xl ${statusLokasi.warnaIcon}`} />
                     </div>
@@ -516,8 +585,8 @@ export default function LokasiSdmView({
       ) : (
         <div className="w-full py-20 rounded-3xl bg-slate-900/50 border-2 border-dashed border-white/10 flex flex-col items-center justify-center text-slate-400 relative z-10 backdrop-blur-md">
           <FontAwesomeIcon icon={faSearch} className="text-4xl mb-4 text-slate-600" />
-          <p className="text-sm font-semibold">Tidak ada SDM valid yang cocok dengan pencarian atau filter.</p>
-          <button onClick={() => { setSearchTerm(''); setFilterKecamatan(''); setFilterDesa(''); }} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 underline font-bold cursor-pointer">Bersihkan Pencarian</button>
+          <p className="text-sm font-semibold">Tidak ada SDM valid yang cocok dengan pencarian "{searchTerm}".</p>
+          <button onClick={() => setSearchTerm('')} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 underline font-bold cursor-pointer">Bersihkan Pencarian</button>
         </div>
       )}
 
@@ -596,6 +665,124 @@ export default function LokasiSdmView({
               </p>
             </div>
             
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------------- */}
+      {/* MODAL: EDIT LOKASI MANUAL (KHUSUS ADMIN / SDM LOGIN TERKAIT)              */}
+      {/* ------------------------------------------------------------------------- */}
+      {editModalOpen && editingStaff && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl shadow-2xl relative flex flex-col overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between bg-slate-950 shrink-0">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-inner">
+                   <FontAwesomeIcon icon={faEdit} className="text-lg" />
+                 </div>
+                 <div>
+                   <h3 className="font-black text-white text-sm sm:text-base uppercase tracking-wide">Edit Lokasi Hari Ini</h3>
+                   <p className="text-[10px] sm:text-xs text-indigo-300 font-bold truncate max-w-[200px] sm:max-w-full">
+                     SDM: {editingStaff.name || editingStaff.NAMA || editingStaff.nama || editingStaff.id}
+                   </p>
+                 </div>
+               </div>
+               <button 
+                 onClick={() => setEditModalOpen(false)} 
+                 className="w-8 h-8 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-rose-500/80 transition-all flex items-center justify-center cursor-pointer border border-transparent hover:border-rose-400"
+               >
+                 <FontAwesomeIcon icon={faTimes} />
+               </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSaveLocation} className="p-5 space-y-4 bg-slate-900/50">
+               
+               {/* Pilihan Tipe Lokasi */}
+               <div>
+                 <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block mb-1.5">Update Posisi / Lokasi</label>
+                 <select
+                   value={editForm.tipe}
+                   onChange={(e) => setEditForm({...editForm, tipe: e.target.value})}
+                   className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs sm:text-sm focus:border-indigo-500 outline-none cursor-pointer transition-colors"
+                 >
+                   <option value="lapangan">Di Lapangan / Desa</option>
+                   <option value="sekretariat">Di Sekretariat PKH</option>
+                 </select>
+               </div>
+
+               {/* Smart Filter Kecamatan & Desa (Hanya jika memilih Di Lapangan) */}
+               {editForm.tipe === 'lapangan' && (
+                 <>
+                   <div>
+                     <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block mb-1.5">Kecamatan (Dari Database)</label>
+                     <select
+                       value={editForm.kecamatan}
+                       onChange={(e) => setEditForm({...editForm, kecamatan: e.target.value, desa: ''})}
+                       className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs sm:text-sm focus:border-indigo-500 outline-none cursor-pointer transition-colors"
+                     >
+                       <option value="">-- Pilih Kecamatan --</option>
+                       {Object.keys(wilayahData).map((kec) => (
+                         <option key={kec} value={kec}>Kec. {kec}</option>
+                       ))}
+                     </select>
+                   </div>
+
+                   <div>
+                     <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block mb-1.5">Desa / Kelurahan</label>
+                     <select
+                       value={editForm.desa}
+                       onChange={(e) => setEditForm({...editForm, desa: e.target.value})}
+                       disabled={!editForm.kecamatan}
+                       className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs sm:text-sm focus:border-indigo-500 outline-none cursor-pointer disabled:opacity-50 transition-colors"
+                     >
+                       <option value="">-- Pilih Desa --</option>
+                       {(wilayahData[editForm.kecamatan] || []).map((des) => (
+                         <option key={des} value={des}>Desa {des}</option>
+                       ))}
+                     </select>
+                   </div>
+                 </>
+               )}
+
+               {/* Keterangan Ekstra */}
+               <div>
+                 <label className="text-[11px] sm:text-xs font-semibold text-slate-300 block mb-1.5">Rincian / Keterangan Lainnya</label>
+                 <input
+                   type="text"
+                   placeholder="Contoh: Menghadiri rapat Musdes, verifikasi KPM..."
+                   value={editForm.keterangan}
+                   onChange={(e) => setEditForm({...editForm, keterangan: e.target.value})}
+                   className="w-full px-3.5 py-2.5 sm:py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs sm:text-sm focus:border-indigo-500 outline-none transition-colors"
+                 />
+               </div>
+
+               {/* Actions / Footer Modal */}
+               <div className="flex items-center gap-3 pt-3 mt-2 border-t border-white/10">
+                 <button
+                   type="submit"
+                   className="flex-1 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm shadow-3d-button flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+                 >
+                   <FontAwesomeIcon icon={faSave} />
+                   <span>Simpan Lokasi</span>
+                 </button>
+                 
+                 {/* Tombol Hapus/Reset (Muncul hanya jika lokasi saat ini sedang diedit manual) */}
+                 {manualLocations[String(editingStaff.id || '').trim()] && (
+                   <button
+                     type="button"
+                     onClick={handleResetLocation}
+                     className="px-4 py-3 rounded-2xl bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 text-rose-300 font-bold text-xs flex items-center justify-center cursor-pointer active:scale-95 transition-all"
+                     title="Reset ke pengaturan default sistem"
+                   >
+                     <FontAwesomeIcon icon={faUndo} />
+                   </button>
+                 )}
+               </div>
+            </form>
+
           </div>
         </div>
       )}
