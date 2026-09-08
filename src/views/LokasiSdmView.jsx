@@ -19,10 +19,10 @@ import {
 
 export default function LokasiSdmView({ 
   staffList = [], 
-  todayPiket = [], 
-  todayAgenda = [],
-  agendas = [],      // Digunakan untuk forecast 7 hari
-  schedules = {}     // Digunakan untuk forecast 7 hari piket
+  todayPiket = [], // (Fallback prop)
+  todayAgenda = [], // (Fallback prop)
+  agendas = [],      // Digunakan untuk pelacakan agenda akurat
+  schedules = {}     // Digunakan untuk pelacakan piket akurat
 }) {
   
   // ---------------------------------------------------------------------------
@@ -38,7 +38,20 @@ export default function LokasiSdmView({
     return () => clearInterval(timer);
   }, []);
 
-  const safeTodayPiket = Array.isArray(todayPiket) ? todayPiket : (todayPiket ? Object.values(todayPiket) : []);
+  // PERBAIKAN ZONA WAKTU LOKAL (WITA/WIB/WIT) AGAR HARI TIDAK MELESET
+  const localYear = currentTime.getFullYear();
+  const localMonth = String(currentTime.getMonth() + 1).padStart(2, '0');
+  const localDay = String(currentTime.getDate()).padStart(2, '0');
+  const todayStrRealtime = `${localYear}-${localMonth}-${localDay}`;
+  const currentMonthKey = `${localYear}-${localMonth}`;
+
+  // Tarik data akurat dari Prop Schedules & Agendas berdasarkan Waktu Lokal
+  const realtimeTodayPiket = schedules[currentMonthKey]?.[todayStrRealtime]?.assigned || [];
+  const realtimeTodayAgenda = agendas.filter((ag) => {
+    if (!ag.date) return false;
+    const cleanDate = ag.date.includes('T') ? ag.date.split('T')[0] : ag.date;
+    return cleanDate === todayStrRealtime;
+  });
 
   // ---------------------------------------------------------------------------
   // 2. PEMBERSIHAN DATA SDM (MENCEGAH LEBIH DARI 29 DATA & HAPUS DUPLIKAT)
@@ -51,10 +64,8 @@ export default function LokasiSdmView({
       if (!staff) return;
       const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim();
       
-      // Abaikan data kosong, null, atau undefined
       if (sdmName && sdmName !== 'undefined' && sdmName !== 'null') {
         const lowerName = sdmName.toLowerCase();
-        // Hanya masukkan ke daftar jika nama belum pernah dimasukkan (mencegah duplikat)
         if (!seenNames.has(lowerName)) {
           seenNames.add(lowerName);
           uniqueStaff.push(staff);
@@ -67,7 +78,6 @@ export default function LokasiSdmView({
 
   const validStaffList = getValidStaffList();
 
-  // Filter List SDM berdasarkan Pencarian Nama atau Jabatan
   const filteredStaffList = validStaffList.filter((staff) => {
     const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').toLowerCase();
     const sdmJabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
@@ -76,27 +86,32 @@ export default function LokasiSdmView({
   });
 
   // ---------------------------------------------------------------------------
-  // 3. LOGIKA UTAMA: PENENTUAN LOKASI HARI INI
+  // 3. LOGIKA UTAMA: PENENTUAN LOKASI HARI INI (FIXED MATCHING LOGIC)
   // ---------------------------------------------------------------------------
   const getStatusLokasiHariIni = (staff) => {
-    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim();
+    const staffId = String(staff.id || '').trim();
+    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim().toLowerCase();
     const jabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const isKetuaKabupaten = jabatan.includes('ketua tim kabupaten');
 
-    // Cek apakah SDM ini Piket hari ini
-    const isPiket = safeTodayPiket.some(p => {
-      const pName = typeof p === 'object' ? (p.name || p.id || p.NAMA || '') : p;
-      return pName.trim().toLowerCase() === sdmName.toLowerCase();
+    // MENDETEKSI PIKET (Mencocokkan ID ataupun NAMA)
+    const isPiket = realtimeTodayPiket.some(p => {
+      const pVal = String(typeof p === 'object' ? (p.id || p.name || p.NAMA || '') : p).trim().toLowerCase();
+      return pVal === staffId.toLowerCase() || pVal === sdmName;
     });
 
-    // Cek apakah SDM ini memiliki Agenda hari ini
-    const agendaSdm = todayAgenda.find(ag => {
+    // MENDETEKSI AGENDA LAPANGAN (Mencocokkan ID ataupun NAMA)
+    const agendaSdm = realtimeTodayAgenda.find(ag => {
       const assignedList = ag.assigned || [];
       const isAssigned = Array.isArray(assignedList) 
-         ? assignedList.some(name => name.toLowerCase() === sdmName.toLowerCase())
-         : (typeof assignedList === 'string' && assignedList.toLowerCase().includes(sdmName.toLowerCase()));
+         ? assignedList.some(val => {
+             const strVal = String(typeof val === 'object' ? (val.id || val.name || '') : val).trim().toLowerCase();
+             return strVal === staffId.toLowerCase() || strVal === sdmName;
+           })
+         : (typeof assignedList === 'string' && (assignedList.toLowerCase().includes(sdmName) || assignedList.includes(staffId)));
       
-      return (ag.sdmName || '').toLowerCase() === sdmName.toLowerCase() || isAssigned;
+      const agSdmName = (ag.sdmName || '').toLowerCase();
+      return agSdmName === sdmName || agSdmName === staffId.toLowerCase() || isAssigned;
     });
 
     // PRIORITAS 1: JIKA JADWAL PIKET -> MUTLAK DI SEKRETARIAT
@@ -158,46 +173,49 @@ export default function LokasiSdmView({
   };
 
   // ---------------------------------------------------------------------------
-  // 4. LOGIKA FORECAST (PRAKIRAAN) 7 HARI KEDEPAN BERDASARKAN NAMA
+  // 4. LOGIKA FORECAST (PRAKIRAAN) 7 HARI KEDEPAN 
   // ---------------------------------------------------------------------------
   const generate7DaysForecast = (staff) => {
-    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim();
+    const staffId = String(staff.id || '').trim();
+    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim().toLowerCase();
     const jabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const isKetuaKabupaten = jabatan.includes('ketua tim kabupaten');
     
     const forecast = [];
-    const today = new Date();
+    const today = new Date(currentTime);
 
     for (let i = 1; i <= 7; i++) {
       const targetDate = new Date(today);
       targetDate.setDate(today.getDate() + i);
       
       const dateStr = targetDate.toISOString().split('T')[0];
-      const monthKey = dateStr.substring(0, 7); // Format: "YYYY-MM"
+      const monthKey = dateStr.substring(0, 7);
       
-      // Nama Hari & Tanggal Indo
       const namaHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
       const hari = namaHari[targetDate.getDay()];
       const tglIndo = `${hari}, ${targetDate.getDate()} / ${targetDate.getMonth() + 1} / ${targetDate.getFullYear()}`;
-
-      // Deteksi Libur (Sabtu / Minggu)
       const isWeekend = targetDate.getDay() === 0 || targetDate.getDay() === 6;
 
-      // Cek Piket di tanggal tersebut
+      // Cek Piket
       const piketList = schedules[monthKey]?.[dateStr]?.assigned || [];
       const isPiket = Array.isArray(piketList) && piketList.some(p => {
-        const pName = typeof p === 'object' ? (p.name || p.id || p.NAMA || '') : p;
-        return pName.trim().toLowerCase() === sdmName.toLowerCase();
+        const pVal = String(typeof p === 'object' ? (p.id || p.name || '') : p).trim().toLowerCase();
+        return pVal === staffId.toLowerCase() || pVal === sdmName;
       });
 
-      // Cek Agenda di tanggal tersebut
+      // Cek Agenda
       const agendaDay = agendas.find(ag => {
         const agDate = ag.date?.includes('T') ? ag.date.split('T')[0] : ag.date;
         const assignedList = ag.assigned || [];
         const isAssigned = Array.isArray(assignedList) 
-           ? assignedList.some(name => name.toLowerCase() === sdmName.toLowerCase())
-           : (typeof assignedList === 'string' && assignedList.toLowerCase().includes(sdmName.toLowerCase()));
-        return agDate === dateStr && ((ag.sdmName || '').toLowerCase() === sdmName.toLowerCase() || isAssigned);
+           ? assignedList.some(val => {
+               const strVal = String(typeof val === 'object' ? (val.id || val.name || '') : val).trim().toLowerCase();
+               return strVal === staffId.toLowerCase() || strVal === sdmName;
+             })
+           : (typeof assignedList === 'string' && (assignedList.toLowerCase().includes(sdmName) || assignedList.includes(staffId)));
+        
+        const agSdmName = (ag.sdmName || '').toLowerCase();
+        return agDate === dateStr && (agSdmName === sdmName || agSdmName === staffId.toLowerCase() || isAssigned);
       });
 
       let statusInfo = {};
@@ -302,7 +320,7 @@ export default function LokasiSdmView({
             const jabatan = staff.jabatan || staff.jabatan_tim || 'SDM PKH';
             const isKetua = jabatan.toLowerCase().includes('ketua tim');
             
-            // Dapatkan Status Logika
+            // Dapatkan Status Logika Berdasarkan Matriks Baru
             const statusLokasi = getStatusLokasiHariIni(staff);
 
             return (
