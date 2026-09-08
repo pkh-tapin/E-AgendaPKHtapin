@@ -23,9 +23,12 @@ import {
   faCalendarCheck
 } from '@fortawesome/free-solid-svg-icons';
 
-export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin }) {
+export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
   const { showToast } = useToast();
   const now = new Date();
+
+  // PENENTUAN MODE PUBLIK (Hanya bisa melihat)
+  const isPublic = !isAdmin && !isSdm;
 
   // ---------------------------------------------------------------------------
   // 1. STATE FILTER KALENDER & DYNAMIC MONTH KEY
@@ -194,6 +197,12 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   };
 
   const handleCardClick = (dateStr, staffId) => {
+    // BLOKIR AKSES JIKA PENGGUNA ADALAH PUBLIK
+    if (isPublic) {
+      showToast('Akses Publik: Anda hanya dapat melihat jadwal piket.', 'info');
+      return;
+    }
+
     const existingReq = pendingRequests.find(
       (r) => (r.staffA === staffId && r.dateA === dateStr) || (r.staffB === staffId && r.dateB === dateStr)
     );
@@ -454,7 +463,9 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             <span>Jadwal Piket Bulanan</span>
           </h2>
           <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">
-            Klik nama petugas untuk mengajukan tukar atau mengelola piket
+            {isPublic 
+              ? 'Mode Publik: Hanya untuk melihat jadwal.' 
+              : 'Klik nama petugas untuk mengajukan tukar atau mengelola piket'}
           </p>
         </div>
 
@@ -658,7 +669,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                 <button
                                   key={staffId}
                                   onClick={() => handleCardClick(dayData.dateStr, staffId)}
-                                  className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col justify-center min-h-[44px] group cursor-pointer ${
+                                  className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col justify-center min-h-[44px] group ${isPublic ? 'cursor-default' : 'cursor-pointer'} ${
                                     isFilteredSdm
                                       ? 'bg-emerald-600/40 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] ring-2 ring-emerald-400'
                                       : pendingReq
@@ -666,8 +677,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                       : showSwapHighlight
                                       ? 'bg-orange-950/80 border-orange-500/70 shadow-[0_0_10px_rgba(249,115,22,0.2)]'
                                       : isToday
-                                      ? 'bg-cyan-950/40 border-cyan-500/30 hover:bg-cyan-900/60'
-                                      : 'bg-slate-950/80 border-white/10 hover:bg-indigo-600/30'
+                                      ? `bg-cyan-950/40 border-cyan-500/30 ${isPublic ? '' : 'hover:bg-cyan-900/60'}`
+                                      : `bg-slate-950/80 border-white/10 ${isPublic ? '' : 'hover:bg-indigo-600/30'}`
                                   }`}
                                 >
                                   <div className="flex justify-between items-center w-full gap-1.5">
@@ -676,7 +687,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                     }`}>
                                       {getStaffName(staffId)}
                                     </span>
-                                    <FontAwesomeIcon icon={faExchangeAlt} className="text-[10px] text-amber-400 shrink-0 opacity-80 sm:opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    <FontAwesomeIcon icon={faExchangeAlt} className={`text-[10px] text-amber-400 shrink-0 opacity-80 sm:opacity-0 ${isPublic ? 'hidden' : 'group-hover:opacity-100'} transition-opacity`} />
                                   </div>
 
                                   {/* KETERANGAN MENUNGGU TUKAR */}
