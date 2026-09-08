@@ -29,7 +29,7 @@ export default function LokasiSdmView({
   // 1. STATE & FILTERING (PENCARIAN REAL-TIME)
   // ---------------------------------------------------------------------------
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStaff, setSelectedStaff] = useState(null); // State untuk Modal 7 Hari
+  const [selectedStaff, setSelectedStaff] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Jam Digital Realtime
@@ -40,28 +40,64 @@ export default function LokasiSdmView({
 
   const safeTodayPiket = Array.isArray(todayPiket) ? todayPiket : (todayPiket ? Object.values(todayPiket) : []);
 
+  // ---------------------------------------------------------------------------
+  // 2. PEMBERSIHAN DATA SDM (MENCEGAH LEBIH DARI 29 DATA & HAPUS DUPLIKAT)
+  // ---------------------------------------------------------------------------
+  const getValidStaffList = () => {
+    const uniqueStaff = [];
+    const seenNames = new Set();
+
+    staffList.forEach(staff => {
+      if (!staff) return;
+      const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim();
+      
+      // Abaikan data kosong, null, atau undefined
+      if (sdmName && sdmName !== 'undefined' && sdmName !== 'null') {
+        const lowerName = sdmName.toLowerCase();
+        // Hanya masukkan ke daftar jika nama belum pernah dimasukkan (mencegah duplikat)
+        if (!seenNames.has(lowerName)) {
+          seenNames.add(lowerName);
+          uniqueStaff.push(staff);
+        }
+      }
+    });
+
+    return uniqueStaff;
+  };
+
+  const validStaffList = getValidStaffList();
+
   // Filter List SDM berdasarkan Pencarian Nama atau Jabatan
-  const filteredStaffList = staffList.filter((staff) => {
-    const sdmName = (staff.name || staff.NAMA || staff.id || '').toLowerCase();
+  const filteredStaffList = validStaffList.filter((staff) => {
+    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').toLowerCase();
     const sdmJabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const search = searchTerm.toLowerCase();
     return sdmName.includes(search) || sdmJabatan.includes(search);
   });
 
   // ---------------------------------------------------------------------------
-  // 2. LOGIKA UTAMA: PENENTUAN LOKASI HARI INI
+  // 3. LOGIKA UTAMA: PENENTUAN LOKASI HARI INI
   // ---------------------------------------------------------------------------
   const getStatusLokasiHariIni = (staff) => {
-    const sdmName = staff.name || staff.NAMA || staff.id;
+    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim();
     const jabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const isKetuaKabupaten = jabatan.includes('ketua tim kabupaten');
 
+    // Cek apakah SDM ini Piket hari ini
     const isPiket = safeTodayPiket.some(p => {
-      const pName = typeof p === 'object' ? p.name || p.id || p.NAMA : p;
-      return pName === sdmName;
+      const pName = typeof p === 'object' ? (p.name || p.id || p.NAMA || '') : p;
+      return pName.trim().toLowerCase() === sdmName.toLowerCase();
     });
 
-    const agendaSdm = todayAgenda.find(ag => ag.sdmName === sdmName || (ag.assigned && ag.assigned.includes(sdmName)));
+    // Cek apakah SDM ini memiliki Agenda hari ini
+    const agendaSdm = todayAgenda.find(ag => {
+      const assignedList = ag.assigned || [];
+      const isAssigned = Array.isArray(assignedList) 
+         ? assignedList.some(name => name.toLowerCase() === sdmName.toLowerCase())
+         : (typeof assignedList === 'string' && assignedList.toLowerCase().includes(sdmName.toLowerCase()));
+      
+      return (ag.sdmName || '').toLowerCase() === sdmName.toLowerCase() || isAssigned;
+    });
 
     // PRIORITAS 1: JIKA JADWAL PIKET -> MUTLAK DI SEKRETARIAT
     if (isPiket) {
@@ -82,7 +118,7 @@ export default function LokasiSdmView({
     if (agendaSdm) {
       return {
         teks: 'Di Lapangan / Desa',
-        subTeks: `Agenda: ${agendaSdm.title} (Desa ${agendaSdm.desa})`,
+        subTeks: `Agenda: ${agendaSdm.title} (Desa ${agendaSdm.desa || '-'})`,
         tipe: 'agenda',
         icon: faMapMarkerAlt,
         badgeBg: 'bg-emerald-500/20',
@@ -122,10 +158,10 @@ export default function LokasiSdmView({
   };
 
   // ---------------------------------------------------------------------------
-  // 3. LOGIKA FORECAST (PRAKIRAAN) 7 HARI KEDEPAN BERDASARKAN NAMA
+  // 4. LOGIKA FORECAST (PRAKIRAAN) 7 HARI KEDEPAN BERDASARKAN NAMA
   // ---------------------------------------------------------------------------
   const generate7DaysForecast = (staff) => {
-    const sdmName = staff.name || staff.NAMA || staff.id;
+    const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id || '').trim();
     const jabatan = (staff.jabatan || staff.jabatan_tim || '').toLowerCase();
     const isKetuaKabupaten = jabatan.includes('ketua tim kabupaten');
     
@@ -149,12 +185,19 @@ export default function LokasiSdmView({
 
       // Cek Piket di tanggal tersebut
       const piketList = schedules[monthKey]?.[dateStr]?.assigned || [];
-      const isPiket = Array.isArray(piketList) && piketList.some(p => (typeof p === 'object' ? p.name || p.id : p) === sdmName);
+      const isPiket = Array.isArray(piketList) && piketList.some(p => {
+        const pName = typeof p === 'object' ? (p.name || p.id || p.NAMA || '') : p;
+        return pName.trim().toLowerCase() === sdmName.toLowerCase();
+      });
 
       // Cek Agenda di tanggal tersebut
       const agendaDay = agendas.find(ag => {
         const agDate = ag.date?.includes('T') ? ag.date.split('T')[0] : ag.date;
-        return agDate === dateStr && (ag.sdmName === sdmName || (ag.assigned && ag.assigned.includes(sdmName)));
+        const assignedList = ag.assigned || [];
+        const isAssigned = Array.isArray(assignedList) 
+           ? assignedList.some(name => name.toLowerCase() === sdmName.toLowerCase())
+           : (typeof assignedList === 'string' && assignedList.toLowerCase().includes(sdmName.toLowerCase()));
+        return agDate === dateStr && ((ag.sdmName || '').toLowerCase() === sdmName.toLowerCase() || isAssigned);
       });
 
       let statusInfo = {};
@@ -164,7 +207,7 @@ export default function LokasiSdmView({
       } else if (isPiket) {
          statusInfo = { status: 'Di Sekretariat (Tugas Piket)', icon: faBuilding, color: 'text-indigo-400', bg: 'bg-indigo-900/50', detail: 'Tugas Pelayanan Sekretariat' };
       } else if (agendaDay) {
-         statusInfo = { status: 'Di Lapangan (Agenda)', icon: faMapMarkerAlt, color: 'text-emerald-400', bg: 'bg-emerald-900/50', detail: `Desa ${agendaDay.desa}: ${agendaDay.title}` };
+         statusInfo = { status: 'Di Lapangan (Agenda)', icon: faMapMarkerAlt, color: 'text-emerald-400', bg: 'bg-emerald-900/50', detail: `Desa ${agendaDay.desa || '-'}: ${agendaDay.title}` };
       } else if (isKetuaKabupaten) {
          statusInfo = { status: 'Di Sekretariat PKH', icon: faBuilding, color: 'text-indigo-400', bg: 'bg-indigo-900/30', detail: 'Standby / Tugas Manajerial' };
       } else {
@@ -178,7 +221,7 @@ export default function LokasiSdmView({
   };
 
   // ---------------------------------------------------------------------------
-  // 4. RENDER ENGINE (UI)
+  // 5. RENDER ENGINE (UI)
   // ---------------------------------------------------------------------------
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10">
@@ -238,7 +281,7 @@ export default function LokasiSdmView({
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
           <span className="px-3 py-1.5 bg-slate-900/80 border border-white/10 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2 shadow-sm">
              <FontAwesomeIcon icon={faUser} className="text-slate-500" />
-             Total: {filteredStaffList.length} SDM
+             Total Data Valid: {filteredStaffList.length} SDM
           </span>
           <span className="px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 rounded-xl text-xs font-bold text-indigo-300 flex items-center gap-2 shadow-sm">
              <FontAwesomeIcon icon={faBuilding} className="text-indigo-400" />
@@ -255,7 +298,7 @@ export default function LokasiSdmView({
       {filteredStaffList.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 w-full relative z-10">
           {filteredStaffList.map((staff, idx) => {
-            const sdmName = staff.name || staff.NAMA || staff.id;
+            const sdmName = (staff.name || staff.NAMA || staff.nama || staff.id).trim();
             const jabatan = staff.jabatan || staff.jabatan_tim || 'SDM PKH';
             const isKetua = jabatan.toLowerCase().includes('ketua tim');
             
@@ -314,7 +357,7 @@ export default function LokasiSdmView({
       ) : (
         <div className="w-full py-20 rounded-3xl bg-slate-900/50 border-2 border-dashed border-white/10 flex flex-col items-center justify-center text-slate-400 relative z-10 backdrop-blur-md">
           <FontAwesomeIcon icon={faSearch} className="text-4xl mb-4 text-slate-600" />
-          <p className="text-sm font-semibold">Tidak ada SDM yang cocok dengan pencarian "{searchTerm}".</p>
+          <p className="text-sm font-semibold">Tidak ada SDM valid yang cocok dengan pencarian "{searchTerm}".</p>
           <button onClick={() => setSearchTerm('')} className="mt-3 text-xs text-indigo-400 hover:text-indigo-300 underline font-bold cursor-pointer">Bersihkan Pencarian</button>
         </div>
       )}
@@ -335,7 +378,7 @@ export default function LokasiSdmView({
                  <div>
                    <h3 className="font-black text-white text-sm sm:text-base uppercase tracking-wide">Prakiraan Agenda 7 Hari</h3>
                    <p className="text-[10px] sm:text-xs text-indigo-300 font-bold truncate max-w-[200px] sm:max-w-full">
-                     Atas Nama: {selectedStaff.name || selectedStaff.NAMA || selectedStaff.id}
+                     Atas Nama: {selectedStaff.name || selectedStaff.NAMA || selectedStaff.nama || selectedStaff.id}
                    </p>
                  </div>
                </div>
