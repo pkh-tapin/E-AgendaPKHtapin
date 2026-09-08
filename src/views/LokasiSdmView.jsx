@@ -14,7 +14,8 @@ import {
   faCheckCircle,
   faClipboardList,
   faExclamationCircle,
-  faMapPin
+  faMapPin,
+  faPhone // Icon tambahan untuk Nomor Telepon
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function LokasiSdmView({ 
@@ -340,6 +341,10 @@ export default function LokasiSdmView({
             const jabatan = staff.jabatan || staff.jabatan_tim || 'SDM PKH';
             const isKetua = jabatan.toLowerCase().includes('ketua tim');
             
+            // Pengambilan Nomor Telepon (Mendukung berbagai nama key dari database)
+            const phoneStr = staff.no_hp || staff.no_WA || staff.no_wa || staff.whatsapp || staff.telepon || '';
+            const phoneDisplay = phoneStr ? phoneStr : 'No. HP Belum Diisi';
+            
             // Dapatkan Status Logika Berdasarkan Matriks Baru
             const statusLokasi = getStatusLokasiHariIni(staff);
 
@@ -359,9 +364,18 @@ export default function LokasiSdmView({
                       <h3 className="font-extrabold text-white text-sm sm:text-base truncate tracking-wide" title={sdmName}>
                         {sdmName}
                       </h3>
-                      <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${isKetua ? 'bg-amber-950/60 border-amber-500/30 text-amber-300' : 'bg-slate-800 border-white/10 text-slate-400'}`}>
-                        {jabatan}
-                      </span>
+                      <div className="flex flex-col items-start gap-1 mt-1">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${isKetua ? 'bg-amber-950/60 border-amber-500/30 text-amber-300' : 'bg-slate-800 border-white/10 text-slate-400'}`}>
+                          {jabatan}
+                        </span>
+                        {/* PENAMBAHAN NOMOR TELEPON */}
+                        <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] text-slate-400 font-semibold mt-0.5" title="Nomor WhatsApp / Telepon">
+                          <FontAwesomeIcon icon={faPhone} className={phoneStr ? 'text-emerald-400' : 'text-slate-500'} />
+                          <span className={phoneStr ? 'text-slate-300' : 'text-slate-500 italic'}>
+                            {phoneDisplay}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
