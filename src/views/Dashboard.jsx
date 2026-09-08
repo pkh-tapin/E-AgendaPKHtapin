@@ -123,6 +123,29 @@ export default function Dashboard({
   const minutesStr = String(dateObj.getMinutes()).padStart(2, '0');
   const secondsStr = String(dateObj.getSeconds()).padStart(2, '0');
 
+  // Variabel todayStr diangkat ke atas agar dapat digunakan oleh Realtime Engine Piket
+  const todayStr = `${currentYear}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(currentDayNum).padStart(2,'0')}`;
+
+  // -------------------------------------------------------------
+  // REAL-TIME JADWAL PIKET HARI BERJALAN (UPDATE OTOMATIS)
+  // -------------------------------------------------------------
+  const [realtimePiket, setRealtimePiket] = useState(null);
+
+  useEffect(() => {
+    const currentMonthKey = todayStr.substring(0, 7);
+    const piketRef = ref(db, `schedules/${currentMonthKey}/${todayStr}/assigned`);
+    
+    const unsubscribe = onValue(piketRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setRealtimePiket(Array.isArray(data) ? data : Object.values(data));
+      } else {
+        setRealtimePiket([]); // Kosongkan jika tidak ada jadwal piket hari ini
+      }
+    });
+    return () => unsubscribe();
+  }, [todayStr]);
+
   const formatIndoDate = (dateStr) => {
     if (!dateStr) return '-';
     const d = new Date(`${dateStr}T00:00:00`);
@@ -148,7 +171,6 @@ export default function Dashboard({
   // GROUPING LOGIC: DEADLINE & AGENDA DALAM SATU CARD (BY DATE)
   // -------------------------------------------------------------
   const combinedItems = [];
-  const todayStr = `${currentYear}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(currentDayNum).padStart(2,'0')}`;
 
   tasks.forEach(task => {
     const rawDate = task.dueDateTime || task.deadline || task.dueDate || '';
@@ -384,10 +406,10 @@ export default function Dashboard({
 
   const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
 
-  // FIX: Memastikan data todayPiket terbaca sempurna (konversi Object ke Array jika data dari Firebase berwujud Object)
-  const safeTodayPiket = Array.isArray(todayPiket) 
-    ? todayPiket 
-    : (todayPiket ? Object.values(todayPiket) : []);
+  // FIX: Memastikan data todayPiket terbaca sempurna & Real-Time (Prioritas ke state Firebase Realtime Engine)
+  const safeTodayPiket = realtimePiket !== null 
+    ? realtimePiket 
+    : (Array.isArray(todayPiket) ? todayPiket : (todayPiket ? Object.values(todayPiket) : []));
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10 overflow-hidden">
