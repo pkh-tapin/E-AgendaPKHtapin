@@ -42,6 +42,9 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const currentSchedule = schedules[currentMonthKey] || {};
   const isScheduleLocked = !!currentSchedule.isLocked;
 
+  // Tanggal Hari Ini untuk penanda (Format: YYYY-MM-DD)
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
   // ---------------------------------------------------------------------------
   // 2. STATE SUB-MENU FILTER JADWAL SDM
   // ---------------------------------------------------------------------------
@@ -595,26 +598,45 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
                   const assignedList = Array.isArray(dayData.assigned) ? dayData.assigned : [];
                   const swappedMap = dayData.swappedInfo || {};
+                  
+                  // DETEKSI APAKAH KOTAK INI ADALAH HARI INI
+                  const isToday = dayData.dateStr === todayStr;
 
                   return (
                     <div
                       key={dayData.dateStr}
-                      className={`p-3 sm:p-4 rounded-2xl border backdrop-blur-md transition-all ${
-                        dayData.isHoliday
+                      className={`relative p-3 sm:p-4 rounded-2xl border backdrop-blur-md transition-all ${
+                        isToday 
+                          ? 'bg-slate-800/80 border-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.3)] ring-1 ring-cyan-400' 
+                          : dayData.isHoliday
                           ? 'bg-rose-950/80 border-rose-500/80 text-rose-200 shadow-[0_0_15px_rgba(244,63,94,0.2)]'
                           : 'bg-white/5 border-white/10 hover:border-indigo-500/40'
                       }`}
                     >
-                      <div className="text-center pb-2 border-b border-white/10 mb-2.5">
-                        <span className="text-[10px] sm:text-[11px] font-bold text-slate-300 block uppercase">{dayName}</span>
+                      {/* EFEK CAHAYA & BADGE "HARI INI" */}
+                      {isToday && (
+                        <>
+                          <div className="absolute inset-0 bg-cyan-400/5 rounded-2xl animate-pulse pointer-events-none"></div>
+                          <div className="absolute -top-3 -right-2 bg-cyan-500 text-slate-950 text-[9px] font-black px-2 py-0.5 rounded-full shadow-[0_0_10px_#22d3ee] z-10 border border-cyan-300">
+                            HARI INI
+                          </div>
+                        </>
+                      )}
+
+                      <div className="text-center pb-2 border-b border-white/10 mb-2.5 relative z-10">
+                        <span className={`text-[10px] sm:text-[11px] font-bold block uppercase ${isToday ? 'text-cyan-300' : 'text-slate-300'}`}>{dayName}</span>
                         <span className={`text-xs font-black mt-0.5 inline-block px-3 py-0.5 rounded-full ${
-                          dayData.isHoliday ? 'bg-rose-600 text-white shadow-md' : 'bg-indigo-950/80 text-cyan-300 border border-cyan-500/30'
+                          dayData.isHoliday 
+                            ? 'bg-rose-600 text-white shadow-md' 
+                            : isToday
+                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50'
+                            : 'bg-indigo-950/80 text-cyan-300 border border-cyan-500/30'
                         }`}>
                           Tanggal {dayData.dayNumber}
                         </span>
                       </div>
 
-                      <div className="space-y-2">
+                      <div className="space-y-2 relative z-10">
                         {!dayData.isHoliday ? (
                           assignedList.length > 0 ? (
                             assignedList.map((staffId) => {
@@ -643,6 +665,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                       ? 'bg-amber-950/80 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.3)] animate-pulse'
                                       : showSwapHighlight
                                       ? 'bg-orange-950/80 border-orange-500/70 shadow-[0_0_10px_rgba(249,115,22,0.2)]'
+                                      : isToday
+                                      ? 'bg-cyan-950/40 border-cyan-500/30 hover:bg-cyan-900/60'
                                       : 'bg-slate-950/80 border-white/10 hover:bg-indigo-600/30'
                                   }`}
                                 >
