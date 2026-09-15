@@ -187,7 +187,6 @@ export default function Dashboard({
   agendas.forEach(ag => {
     const rawDate = ag.date || '';
     const { dateStr, timeStr } = getLocalFormat(rawDate);
-    // PERBAIKAN: Izinkan agenda pada hari ini (todayStr) atau setelahnya masuk ke combinedItems
     if (dateStr >= todayStr) {
       const fixedTime = ag.time || timeStr || '23:59';
       combinedItems.push({
@@ -205,17 +204,12 @@ export default function Dashboard({
   // Group berdasarkan Tanggal (DENGAN FILTER HILANGKAN YANG TERLEWAT JAUH)
   const groupedItems = {};
   combinedItems.forEach(item => {
-    // KUNCI PERBAIKAN: Jika tanggal sama dengan hari ini, TETAP TAMPILKAN meskipun jam sudah lewat sedikit,
-    // Agar aktivitas hari berjalan tidak mendadak hilang dari Dashboard. 
-    // Untuk hari kemarin, baru kita buang mutlak.
     if (item.sortDate < todayStr) return; 
     
     if (item.sortDate === todayStr) {
-        // Toleransi: Kegiatan hari ini tetap tampil hingga tengah malam berakhir
         if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
         groupedItems[item.sortDate].push(item);
     } else {
-        // Untuk hari esok dan seterusnya, pastikan waktunya tidak di masa lalu (validasi keamanan)
         if (item.timestamp <= nowTimestamp) return;
         if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
         groupedItems[item.sortDate].push(item);
@@ -223,8 +217,6 @@ export default function Dashboard({
   });
   
   const sortedDates = Object.keys(groupedItems).sort((a,b) => new Date(a) - new Date(b));
-  
-  // Ambil data untuk "Rincian Kegiatan Hari Ini" berdasarkan array yang sudah difilter di atas
   const todayItems = groupedItems[todayStr] || [];
 
   const getCountdown = (targetTime) => {
@@ -265,12 +257,10 @@ export default function Dashboard({
   // LOGIKA PENENTUAN LOKASI SDM KHUSUS
   // -------------------------------------------------------------
   const tentukanLokasiSDM = (sdmName, todayPiketList, todayAgendaList, sdmRole = '') => {
-    // 1. Pengecekan Jabatan: Ketua Tim Kabupaten SELALU di Sekretariat
     if (sdmRole && sdmRole.toLowerCase().includes('ketua tim kabupaten')) {
         return 'Di Sekretariat PKH';
     }
 
-    // 2. Pengecekan Piket: Jika Piket Hari Ini, di Sekretariat
     const isPiket = todayPiketList.some(p => {
         const pName = typeof p === 'object' ? p.name || p.id || p.NAMA : p;
         return pName === sdmName;
@@ -280,14 +270,12 @@ export default function Dashboard({
         return 'Di Sekretariat PKH';
     }
 
-    // 3. Pengecekan Agenda: Jika ada agenda khusus
     const hasAgenda = todayAgendaList.some(ag => ag.sdmName === sdmName || (ag.assigned && ag.assigned.includes(sdmName)));
     
     if (hasAgenda) {
         return 'Di Lapangan atau di Desa sesuai agenda yang diinput';
     }
 
-    // 4. Default: Ketua Tim Kecamatan dan SDM lainnya ke Lapangan
     return 'Di Lapangan';
   };
 
@@ -317,7 +305,6 @@ export default function Dashboard({
     return next3WorkingDates.includes(cleanDate);
   });
 
-  // PERBAIKAN: Menjaga Agenda Hari Ini (todayAgenda) tetap tampil di box widget meskipun jam sudah terlewat
   const activeTodayAgenda = todayAgenda.filter(ag => {
     const { dateStr } = getLocalFormat(ag.date || '');
     return (dateStr || todayStr) === todayStr; 
@@ -417,7 +404,6 @@ export default function Dashboard({
 
   const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
 
-  // FIX: Memastikan data todayPiket terbaca sempurna & Real-Time (Prioritas ke state Firebase Realtime Engine)
   const safeTodayPiket = realtimePiket !== null 
     ? realtimePiket 
     : (Array.isArray(todayPiket) ? todayPiket : (todayPiket ? Object.values(todayPiket) : []));
@@ -482,7 +468,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* FITUR BARU: TABEL RINCIAN KEGIATAN HARI INI (MOBILE-FIRST) DENGAN LOGIKA LOKASI SDM */}
+      {/* TABEL RINCIAN KEGIATAN HARI INI DENGAN KOLOM MATERI & LOKASI DESA/KECAMATAN TERPISAH */}
       <div className="space-y-4 sm:space-y-6 pt-2 relative z-10 w-full">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white border-b border-white/10 pb-3">
           <div className="flex items-center gap-3">
@@ -499,12 +485,14 @@ export default function Dashboard({
 
         <div className="rounded-[24px] bg-slate-900/80 border border-emerald-500/30 backdrop-blur-xl shadow-2xl overflow-hidden group hover:border-emerald-500/60 transition-all duration-300 w-full">
           <div className="overflow-x-auto custom-scrollbar w-full">
-            <table className="w-full text-left border-collapse min-w-[700px]">
+            <table className="w-full text-left border-collapse min-w-[950px]">
               <thead>
                 <tr className="bg-slate-950/90 text-slate-300 text-[10px] sm:text-xs uppercase tracking-widest border-b border-white/10">
                   <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Judul Kegiatan</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Lokasi (Desa & Kec.)</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Materi / P2K2</th>
                   <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Status Lokasi SDM Terkait</th>
-                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Kategori</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Kategori & Supervisi</th>
                   <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Waktu & Hitung Mundur</th>
                 </tr>
               </thead>
@@ -514,46 +502,46 @@ export default function Dashboard({
                     const countdown = getCountdown(item.timestamp);
                     const isTask = item.itemType === 'task';
                     
-                    // Mendapatkan nama sdm dari item
                     const targetSdmName = isTask ? getTargetText(item) : (item.sdmName || 'Seluruh SDM');
-                    
-                    // Mengambil role jabatan jika ada di staffList (Asumsi role ada di property jabatan/jabatan_tim)
                     const staffData = staffList.find(s => (typeof s === 'object' && (s.name === targetSdmName || s.NAMA === targetSdmName || s.id === targetSdmName)));
                     const sdmRole = staffData ? staffData.jabatan : ''; 
-                    
-                    // Eksekusi Logika Lokasi SDM
                     const statusLokasi = tentukanLokasiSDM(targetSdmName, safeTodayPiket, activeTodayAgenda, sdmRole);
 
                     return (
-                      <tr key={idx} className="hover:bg-white/5 transition-colors duration-200 group/row">
-                        <td className="p-4 sm:p-5 font-bold break-words min-w-[220px]">
+                      <tr key={idx} className="hover:bg-white/5 transition-colors duration-200 group/row align-top">
+                        <td className="p-4 sm:p-5 font-bold break-words min-w-[200px]">
                           <span className={isTask ? "text-rose-100 group-hover/row:text-rose-300" : "text-cyan-100 group-hover/row:text-cyan-300"}>
                             {item.title}
                           </span>
                           <div className="mt-1 text-[10px] text-slate-400 font-normal">
                              Target: {targetSdmName}
                           </div>
-                          {/* PERBAIKAN: Menampilkan Desa, Materi P2K2, dan Status Supervisi */}
-                          {!isTask && (
-                             <div className="mt-2 space-y-1">
-                               <div className="text-[10px] text-slate-300 flex items-center gap-1.5">
-                                 <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400" />
-                                 <span>Desa {item.desa || '-'}, Kec. {item.kecamatan || '-'}</span>
-                               </div>
-                               {item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 && (
-                                 <div className="text-[10px] text-amber-300 flex items-start gap-1.5">
-                                   <FontAwesomeIcon icon={faStickyNote} className="mt-0.5" />
-                                   <span className="leading-tight">{item.modulP2K2} - {item.sesiP2K2}</span>
-                                 </div>
-                               )}
-                               {item.isSupervisiKatim && (
-                                 <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold mt-0.5 shadow-sm">
-                                   <FontAwesomeIcon icon={faUserShield} /> Disupervisi Katim
-                                 </div>
-                               )}
-                             </div>
+                        </td>
+
+                        {/* KOLOM LOKASI: DESA & KECAMATAN */}
+                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+                          {isTask ? (
+                            <span className="text-slate-500 italic text-xs">Kantor / Online</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5 text-slate-200 text-xs font-semibold">
+                              <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400 shrink-0" />
+                              <span>Desa {item.desa || '-'}, Kec. {item.kecamatan || '-'}</span>
+                            </div>
                           )}
                         </td>
+
+                        {/* KOLOM MATERI / P2K2 */}
+                        <td className="p-4 sm:p-5 align-middle min-w-[180px]">
+                          {!isTask && item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 ? (
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-amber-500/20 space-y-0.5">
+                              <div className="text-[11px] font-bold text-amber-400">{item.modulP2K2}</div>
+                              <div className="text-[10px] text-slate-300 leading-snug">{item.sesiP2K2}</div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic text-xs">-</span>
+                          )}
+                        </td>
+
                         <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
                           <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-bold text-[10px] shadow-sm
                              ${statusLokasi === 'Di Sekretariat PKH' ? 'bg-indigo-900/50 border-indigo-500/50 text-indigo-300' : 
@@ -563,17 +551,27 @@ export default function Dashboard({
                              {statusLokasi}
                           </span>
                         </td>
-                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+
+                        {/* KOLOM KATEGORI & KETERANGAN SUPERVISI */}
+                        <td className="p-4 sm:p-5 align-middle space-y-2">
                           {isTask ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest border border-rose-500/30 uppercase">
                               <FontAwesomeIcon icon={faTasks} /> Deadline
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest border border-cyan-500/30 uppercase">
-                              <FontAwesomeIcon icon={faCalendarCheck} /> Agenda
-                            </span>
+                            <div className="space-y-1.5">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest border border-cyan-500/30 uppercase">
+                                <FontAwesomeIcon icon={faCalendarCheck} /> Agenda
+                              </span>
+                              {item.isSupervisiKatim && (
+                                <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold shadow-sm w-fit">
+                                  <FontAwesomeIcon icon={faUserShield} /> Disupervisi Katim
+                                </div>
+                              )}
+                            </div>
                           )}
                         </td>
+
                         <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
                            <div className="flex flex-col gap-2">
                              <span className="bg-slate-950/80 px-2 py-1 rounded border border-white/10 text-amber-300 shadow-inner flex items-center gap-1.5 w-fit font-mono font-bold text-xs">
@@ -603,7 +601,7 @@ export default function Dashboard({
                   })
                 ) : (
                   <tr>
-                    <td colSpan="4" className="p-10 text-center text-slate-400 italic text-xs sm:text-sm bg-slate-900/30">
+                    <td colSpan="6" className="p-10 text-center text-slate-400 italic text-xs sm:text-sm bg-slate-900/30">
                       <FontAwesomeIcon icon={faCheckCircle} className="text-3xl text-slate-600 mb-3 block mx-auto" />
                       Semua agenda atau tugas untuk hari ini sudah selesai/terlewati.
                     </td>
@@ -767,7 +765,6 @@ export default function Dashboard({
                                       {item.sdmName}
                                     </span>
                                   )}
-                                  {/* PERBAIKAN: Menampilkan Materi P2K2 & Supervisi di Card */}
                                   {item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 && (
                                     <span className="text-amber-200 font-bold bg-amber-950/60 px-3 py-1.5 rounded-lg border border-amber-500/30 shadow-sm flex items-center gap-2">
                                       <FontAwesomeIcon icon={faStickyNote} className="text-amber-400"/>
@@ -958,7 +955,6 @@ export default function Dashboard({
                     <span className="text-[10px] sm:text-[11px] text-slate-300 block mt-1">
                       📍 Desa {ag.desa || '-'}, Kec. {ag.kecamatan || '-'} | ⏰ {ag.time}
                     </span>
-                    {/* PERBAIKAN: Materi P2K2 & Supervisi di Mini List */}
                     {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
                       <span className="text-[9px] sm:text-[10px] text-amber-300 block mt-0.5 break-words">
                         📝 {ag.modulP2K2} - {ag.sesiP2K2}
@@ -994,7 +990,6 @@ export default function Dashboard({
                     <span className="text-[10px] text-slate-300 block">
                       📍 Desa {ag.desa || '-'}, Kec. {ag.kecamatan || '-'} | ⏰ {ag.time}
                     </span>
-                    {/* PERBAIKAN: Materi P2K2 & Supervisi di Mini List */}
                     {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
                       <span className="text-[9px] text-amber-300 block mt-0.5 break-words">
                         📝 {ag.modulP2K2} - {ag.sesiP2K2}
