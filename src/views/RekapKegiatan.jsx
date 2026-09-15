@@ -110,6 +110,7 @@ export default function RekapKegiatan({ tasks = [], agendas = [], staffList = []
       });
     });
 
+    // DIKUNCI: Pengurutan Descending (Terbaru di atas, Terlama di bawah)
     return combined.sort((a, b) => b.rawTimestamp - a.rawTimestamp);
   }, [tasks, agendas, staffList]);
 
