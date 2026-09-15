@@ -393,6 +393,11 @@ export default function AgendaView({ agendas = [], categories = [], onAddCategor
     const matchSupervisi = filterMode !== 'supervisi' || ag.isSupervisiKatim === true;
 
     return matchSearch && matchKec && matchDesa && matchCat && matchSupervisi;
+  }).sort((a, b) => {
+    // Pengurutan Waktu Descending: Tanggal/Jam Terbaru Paling Atas
+    const dateTimeA = new Date(`${a.date || '1970-01-01'}T${a.time || '00:00'}`).getTime();
+    const dateTimeB = new Date(`${b.date || '1970-01-01'}T${b.time || '00:00'}`).getTime();
+    return dateTimeB - dateTimeA;
   });
 
   return (
