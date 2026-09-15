@@ -533,6 +533,26 @@ export default function Dashboard({
                           <div className="mt-1 text-[10px] text-slate-400 font-normal">
                              Target: {targetSdmName}
                           </div>
+                          {/* PERBAIKAN: Menampilkan Desa, Materi P2K2, dan Status Supervisi */}
+                          {!isTask && (
+                             <div className="mt-2 space-y-1">
+                               <div className="text-[10px] text-slate-300 flex items-center gap-1.5">
+                                 <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400" />
+                                 <span>Desa {item.desa || '-'}, Kec. {item.kecamatan || '-'}</span>
+                               </div>
+                               {item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 && (
+                                 <div className="text-[10px] text-amber-300 flex items-start gap-1.5">
+                                   <FontAwesomeIcon icon={faStickyNote} className="mt-0.5" />
+                                   <span className="leading-tight">{item.modulP2K2} - {item.sesiP2K2}</span>
+                                 </div>
+                               )}
+                               {item.isSupervisiKatim && (
+                                 <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-bold mt-0.5 shadow-sm">
+                                   <FontAwesomeIcon icon={faUserShield} /> Disupervisi Katim
+                                 </div>
+                               )}
+                             </div>
+                          )}
                         </td>
                         <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
                           <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-bold text-[10px] shadow-sm
@@ -739,12 +759,25 @@ export default function Dashboard({
                                 <div className="flex flex-wrap gap-2.5 text-xs">
                                   <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
                                     <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400"/>
-                                    Desa {item.desa}, Kec. {item.kecamatan}
+                                    Desa {item.desa || '-'}, Kec. {item.kecamatan || '-'}
                                   </span>
                                   {item.sdmName && (
                                     <span className="text-emerald-200 font-bold bg-emerald-950/60 px-3 py-1.5 rounded-lg border border-emerald-500/30 shadow-sm flex items-center gap-2">
                                       <FontAwesomeIcon icon={faUser} className="text-emerald-400"/>
                                       {item.sdmName}
+                                    </span>
+                                  )}
+                                  {/* PERBAIKAN: Menampilkan Materi P2K2 & Supervisi di Card */}
+                                  {item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 && (
+                                    <span className="text-amber-200 font-bold bg-amber-950/60 px-3 py-1.5 rounded-lg border border-amber-500/30 shadow-sm flex items-center gap-2">
+                                      <FontAwesomeIcon icon={faStickyNote} className="text-amber-400"/>
+                                      {item.modulP2K2} - {item.sesiP2K2}
+                                    </span>
+                                  )}
+                                  {item.isSupervisiKatim && (
+                                    <span className="text-amber-300 font-bold bg-amber-500/20 px-3 py-1.5 rounded-lg border border-amber-500/40 shadow-sm flex items-center gap-2">
+                                      <FontAwesomeIcon icon={faUserShield} className="text-amber-400"/>
+                                      Disupervisi Katim
                                     </span>
                                   )}
                                 </div>
@@ -923,11 +956,22 @@ export default function Dashboard({
                   <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-cyan-500/10 transition-colors">
                     <span className="font-bold text-cyan-200 block text-xs sm:text-sm break-words">{ag.title}</span>
                     <span className="text-[10px] sm:text-[11px] text-slate-300 block mt-1">
-                      📍 Desa {ag.desa}, Kec. {ag.kecamatan} | ⏰ {ag.time}
+                      📍 Desa {ag.desa || '-'}, Kec. {ag.kecamatan || '-'} | ⏰ {ag.time}
                     </span>
+                    {/* PERBAIKAN: Materi P2K2 & Supervisi di Mini List */}
+                    {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
+                      <span className="text-[9px] sm:text-[10px] text-amber-300 block mt-0.5 break-words">
+                        📝 {ag.modulP2K2} - {ag.sesiP2K2}
+                      </span>
+                    )}
                     {ag.sdmName && (
                       <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5">
                         👤 SDM: {ag.sdmName}
+                      </span>
+                    )}
+                    {ag.isSupervisiKatim && (
+                      <span className="text-[9px] text-amber-400 font-bold block mt-0.5">
+                        🛡️ Disupervisi Ketua Tim
                       </span>
                     )}
                   </div>
@@ -948,11 +992,22 @@ export default function Dashboard({
                       </span>
                     </div>
                     <span className="text-[10px] text-slate-300 block">
-                      📍 Desa {ag.desa}, Kec. {ag.kecamatan} | ⏰ {ag.time}
+                      📍 Desa {ag.desa || '-'}, Kec. {ag.kecamatan || '-'} | ⏰ {ag.time}
                     </span>
+                    {/* PERBAIKAN: Materi P2K2 & Supervisi di Mini List */}
+                    {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
+                      <span className="text-[9px] text-amber-300 block mt-0.5 break-words">
+                        📝 {ag.modulP2K2} - {ag.sesiP2K2}
+                      </span>
+                    )}
                     {ag.sdmName && (
                       <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5">
                         👤 SDM: {ag.sdmName}
+                      </span>
+                    )}
+                    {ag.isSupervisiKatim && (
+                      <span className="text-[9px] text-amber-400 font-bold block mt-0.5">
+                        🛡️ Disupervisi Ketua Tim
                       </span>
                     )}
                   </div>
