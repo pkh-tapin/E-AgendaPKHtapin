@@ -187,8 +187,9 @@ export default function Dashboard({
   agendas.forEach(ag => {
     const rawDate = ag.date || '';
     const { dateStr, timeStr } = getLocalFormat(rawDate);
+    // PERBAIKAN: Izinkan agenda pada hari ini (todayStr) atau setelahnya masuk ke combinedItems
     if (dateStr >= todayStr) {
-      const fixedTime = ag.time || timeStr;
+      const fixedTime = ag.time || timeStr || '23:59';
       combinedItems.push({
         ...ag,
         itemType: 'agenda',
@@ -201,17 +202,29 @@ export default function Dashboard({
 
   combinedItems.sort((a, b) => a.timestamp - b.timestamp);
 
-  // Group berdasarkan Tanggal (DENGAN FILTER HILANGKAN YANG TERLEWAT)
+  // Group berdasarkan Tanggal (DENGAN FILTER HILANGKAN YANG TERLEWAT JAUH)
   const groupedItems = {};
   combinedItems.forEach(item => {
-    // KUNCI: Jika waktu kegiatan sudah lewat dari real-time saat ini, jangan dimasukkan (Sembunyikan)
-    if (item.timestamp <= nowTimestamp) return; 
-
-    if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
-    groupedItems[item.sortDate].push(item);
+    // KUNCI PERBAIKAN: Jika tanggal sama dengan hari ini, TETAP TAMPILKAN meskipun jam sudah lewat sedikit,
+    // Agar aktivitas hari berjalan tidak mendadak hilang dari Dashboard. 
+    // Untuk hari kemarin, baru kita buang mutlak.
+    if (item.sortDate < todayStr) return; 
+    
+    if (item.sortDate === todayStr) {
+        // Toleransi: Kegiatan hari ini tetap tampil hingga tengah malam berakhir
+        if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
+        groupedItems[item.sortDate].push(item);
+    } else {
+        // Untuk hari esok dan seterusnya, pastikan waktunya tidak di masa lalu (validasi keamanan)
+        if (item.timestamp <= nowTimestamp) return;
+        if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
+        groupedItems[item.sortDate].push(item);
+    }
   });
   
   const sortedDates = Object.keys(groupedItems).sort((a,b) => new Date(a) - new Date(b));
+  
+  // Ambil data untuk "Rincian Kegiatan Hari Ini" berdasarkan array yang sudah difilter di atas
   const todayItems = groupedItems[todayStr] || [];
 
   const getCountdown = (targetTime) => {
@@ -304,12 +317,10 @@ export default function Dashboard({
     return next3WorkingDates.includes(cleanDate);
   });
 
-  // Filter untuk menghilangkan Agenda Kecil yang sudah terlewat waktu
+  // PERBAIKAN: Menjaga Agenda Hari Ini (todayAgenda) tetap tampil di box widget meskipun jam sudah terlewat
   const activeTodayAgenda = todayAgenda.filter(ag => {
-    const { dateStr, timeStr } = getLocalFormat(ag.date || '');
-    const tStr = ag.time || timeStr || '23:59';
-    const ts = new Date(`${dateStr || todayStr}T${tStr.length === 5 ? tStr + ':00' : tStr}`).getTime();
-    return ts > nowTimestamp;
+    const { dateStr } = getLocalFormat(ag.date || '');
+    return (dateStr || todayStr) === todayStr; 
   });
 
   const activeUpcomingAgenda = upcoming3DaysAgendaList.filter(ag => {
