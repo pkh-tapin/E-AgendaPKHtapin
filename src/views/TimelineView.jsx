@@ -151,7 +151,8 @@ export default function TimelineView({ agendas = [], tasks = [], staffList = [] 
   ].sort((a, b) => {
     const timeA = new Date(`${a.date || '1970-01-01'}T${a.time || '00:00'}`).getTime();
     const timeB = new Date(`${b.date || '1970-01-01'}T${b.time || '00:00'}`).getTime();
-    return timeA - timeB;
+    // DIKUNCI & DISEMPURNAKAN: Tanggal terbaru paling atas, terlama ke bawah (Descending)
+    return timeB - timeA; 
   });
 
   // Filter Timeline
