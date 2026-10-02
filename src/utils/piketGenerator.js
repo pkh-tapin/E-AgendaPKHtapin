@@ -14,8 +14,8 @@
  *    - Jika SDM A & SDM B pernah piket bersama di piket ke-1, maka pada piket ke-2
  *      MEREKA WAJIB DIPISAHKAN dan dipasangkan dengan SDM lain agar adil.
  * 6. Garansi Kuota Harian & Anti Senin-Senin:
- *    - SENIN        : TERBANYAK / PRIORITAS (Dilarang keras 1 SDM dapat 2x Senin).
- *    - SELASA-KAMIS : Kuota standar (piketHarianQuota).
+ *    - SENIN        : TERBANYAK / PRIORITAS (Wajib lebih besar dari hari lain, misal Senin 4, Sel-Kam 2/3).
+ *    - SELASA-KAMIS : Kuota standar menyesuaikan sisa kuota (piketHarianQuota).
  *    - JUMAT        : KUNCI MATI maksimal 2 orang.
  *    - GARANSI AKHIR: JIKA HARI EFEKTIF > 12, Setiap SDM WAJIB mendapatkan 
  *      TEPAT 2 kali piket (tidak kurang/tidak lebih, SEMUA KEBAGIAN RATA).
@@ -126,7 +126,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   // FORMULA INTERVAL KUNCI MATI: Fix 14 Hari Kalender
   const requiredInterval = 14;
 
-  // KALKULASI KUOTA HARIAN DINAMIS PRESISI (Penyempurnaan Matematis agar total slot PAS)
+  // KALKULASI KUOTA HARIAN DINAMIS PRESISI (Matematika Prioritas Senin & Jumat Kunci 2)
   const dailyQuotas = validDays.map(() => 0);
   let remainingShifts = totalShiftsNeeded;
   const fridayQuota = 2; // Jumat Kunci Mati Maksimal 2
@@ -140,27 +140,41 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     }
   });
 
-  // Distribusikan sisa kuota ke Senin - Kamis
-  // Memastikan Kuota Harian Total = Total Shift Dibutuhkan
-  const monThuIndices = validDays.map((d, i) => d.dayOfWeek !== 5 ? i : -1).filter(i => i !== -1);
-  if (monThuIndices.length > 0 && remainingShifts > 0) {
-    let baseQuota = Math.floor(remainingShifts / monThuIndices.length);
-    monThuIndices.forEach(i => {
-      dailyQuotas[i] += baseQuota;
-      remainingShifts -= baseQuota;
+  // Distribusikan sisa kuota ke Senin - Kamis (ATURAN BARU: SENIN WAJIB LEBIH BANYAK)
+  const countMondays = validDays.filter(d => d.dayOfWeek === 1).length;
+  const countTueThu = validDays.filter(d => d.dayOfWeek >= 2 && d.dayOfWeek <= 4).length;
+
+  if ((countMondays > 0 || countTueThu > 0) && remainingShifts > 0) {
+    // Formulasi Prioritas Senin: Base(TueThu) dihitung setelah menjamin Senin mendapat 1 ekstra tiap harinya.
+    let baseTueThuQuota = Math.max(1, Math.floor((remainingShifts - countMondays) / (countMondays + countTueThu)));
+    let baseMondayQuota = baseTueThuQuota + 1; // Prioritas Kunci: Senin WAJIB Lebih Besar dari Selasa-Kamis
+
+    // Alokasikan base kuota ke masing-masing index
+    validDays.forEach((d, i) => {
+      if (d.dayOfWeek === 1 && remainingShifts > 0) {
+        let quotaToAssign = Math.min(baseMondayQuota, remainingShifts);
+        dailyQuotas[i] = quotaToAssign;
+        remainingShifts -= quotaToAssign;
+      } else if (d.dayOfWeek >= 2 && d.dayOfWeek <= 4 && remainingShifts > 0) {
+        let quotaToAssign = Math.min(baseTueThuQuota, remainingShifts);
+        dailyQuotas[i] = quotaToAssign;
+        remainingShifts -= quotaToAssign;
+      }
     });
 
-    // Sisa ganjil didorong ke hari Senin terlebih dahulu
-    const monIndices = monThuIndices.filter(i => validDays[i].dayOfWeek === 1);
-    const tueThuIndices = monThuIndices.filter(i => validDays[i].dayOfWeek !== 1);
+    // Jika masih ada sisa ganjil (remainder), WAJIB didorong ke Senin dulu agar Senin makin tinggi
+    const monIndices = validDays.map((d, i) => d.dayOfWeek === 1 ? i : -1).filter(i => i !== -1);
+    const tueThuIndices = validDays.map((d, i) => (d.dayOfWeek >= 2 && d.dayOfWeek <= 4) ? i : -1).filter(i => i !== -1);
 
     while (remainingShifts > 0) {
+      let hasAssigned = false;
       for (let i of monIndices) {
-        if (remainingShifts > 0) { dailyQuotas[i]++; remainingShifts--; }
+        if (remainingShifts > 0) { dailyQuotas[i]++; remainingShifts--; hasAssigned = true; }
       }
       for (let i of tueThuIndices) {
-        if (remainingShifts > 0) { dailyQuotas[i]++; remainingShifts--; }
+        if (remainingShifts > 0) { dailyQuotas[i]++; remainingShifts--; hasAssigned = true; }
       }
+      if (!hasAssigned) break; // Mencegah infinite loop jika terjadi kesalahan
     }
   }
 
