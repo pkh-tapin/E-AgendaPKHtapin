@@ -3,12 +3,12 @@
  * BLUEPRINT ENGINE: GENERATE MONTHLY SCHEDULE SDM PKH TAPIN
  * Developer: M. Zaen Syachrullah
  * 
- * ATURAN DAN LOGIKA BISNIS PIKET RESMI:
+ * ATURAN DAN LOGIKA BISNIS PIKET RESMI (UPDATE SUPER KETAT):
  * 1. Target Periode: Dinamis berdasarkan parameter bulan dan tahun input admin.
  * 2. Hari Kerja Efektif: Hanya Senin sampai Jumat (Sabtu & Minggu libur).
  * 3. Hari Libur Resmi (Holidays): Tanggal merah dikosongkan (assigned = []).
  * 4. Jarak Interval Piket 1 & Piket 2 (Spacing):
- *    - Required Interval = Total Hari Kerja Efektif / 2.
+ *    - Required Interval KUNCI MATI = Minimal 14 Hari (2 Minggu).
  *    - Garansi piket 1 dan piket 2 tidak akan berdekatan.
  * 5. Variasi Pasangan Petugas (Anti-Duplikasi Pasangan):
  *    - Jika SDM A & SDM B pernah piket bersama di piket ke-1, maka pada piket ke-2
@@ -17,7 +17,8 @@
  *    - SENIN        : TERBANYAK / PRIORITAS (Dilarang keras 1 SDM dapat 2x Senin).
  *    - SELASA-KAMIS : Kuota standar (piketHarianQuota).
  *    - JUMAT        : KUNCI MATI maksimal 2 orang.
- *    - GARANSI AKHIR: Setiap SDM WAJIB mendapatkan TEPAT 2 kali piket (tidak kurang/lebih).
+ *    - GARANSI AKHIR: JIKA HARI EFEKTIF > 12, Setiap SDM WAJIB mendapatkan 
+ *      TEPAT 2 kali piket (tidak kurang/tidak lebih, SEMUA KEBAGIAN RATA).
  * =============================================================================
  */
 
@@ -54,9 +55,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const dayOfWeek = dateObj.getDay();
 
     if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Exclude Sabtu & Minggu
-      // PERBAIKAN: Sintaks Template Literal Diperbaiki
-      const dateStr = `\({targetYear}-\){String(targetMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const formattedLabel = `\({d}\){namaBulan[targetMonth - 1]} ${targetYear}`;
+      const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const formattedLabel = `${d} ${namaBulan[targetMonth - 1]} ${targetYear}`;
       const dayName = namaHari[dayOfWeek];
 
       if (dayOfWeek === 1 && workDays.length > 0) {
@@ -72,7 +72,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
         dateStr,
         formattedLabel,
         dayName,
-        dayNumber: d,
+        dayNumber: d, // Penting untuk hitungan absolut 14 hari
         dayOfWeek,
         weekIndex: currentWeek,
         isHoliday,
@@ -116,33 +116,60 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   }
 
   // ---------------------------------------------------------------------------
-  // 2. PENETAPAN ATURAN TARGET & INTERVAL KUNCI MATI
+  // 2. PENETAPAN ATURAN TARGET & INTERVAL KUNCI MATI (14 HARI)
   // ---------------------------------------------------------------------------
-  const minWorkdaysThreshold = Number(config.minWorkdaysForDoublePiket) || 13;
+  // Rule Baru: Jika hari efektif > 12, maka WAJIB 2 KALI
+  const minWorkdaysThreshold = 12; 
   const targetPerStaff = totalEffectiveDays > minWorkdaysThreshold ? 2 : 1;
   const totalShiftsNeeded = totalSdm * targetPerStaff;
 
-  // FORMULA INTERVAL KUNCI MATI: TOTAL HARI KERJA / 2 (MINIMAL 10-14 HARI)
-  const requiredInterval = Math.max(1, Math.floor(totalEffectiveDays / 2));
+  // FORMULA INTERVAL KUNCI MATI: Fix 14 Hari Kalender
+  const requiredInterval = 14;
 
-  // KALKULASI KUOTA HARIAN DINAMIS PRESISI
+  // KALKULASI KUOTA HARIAN DINAMIS PRESISI (Penyempurnaan Matematis agar total slot PAS)
+  const dailyQuotas = validDays.map(() => 0);
+  let remainingShifts = totalShiftsNeeded;
   const fridayQuota = 2; // Jumat Kunci Mati Maksimal 2
-  const countFridays = validDays.filter(d => d.dayOfWeek === 5).length;
-  const countMondays = validDays.filter(d => d.dayOfWeek === 1).length;
-  const countTueThu = validDays.filter(d => d.dayOfWeek >= 2 && d.dayOfWeek <= 4).length;
 
-  const totalFridaySlots = countFridays * fridayQuota;
-  const remainingShiftsNeeded = Math.max(0, totalShiftsNeeded - totalFridaySlots);
-
-  // Hitung Kuota Dasar Selasa-Kamis & Kuota Tambahan Senin
-  let baseTueThuQuota = Math.max(2, Math.floor(remainingShiftsNeeded / (countMondays * 1.5 + countTueThu)));
-  let mondayQuota = Math.max(baseTueThuQuota + 1, Number(config.piketSeninQuota) || 3);
-
-  const dailyQuotas = validDays.map((d) => {
-    if (d.dayOfWeek === 1) return mondayQuota;
-    if (d.dayOfWeek === 5) return fridayQuota;
-    return baseTueThuQuota;
+  // Alokasikan Jumat Terlebih Dahulu
+  validDays.forEach((d, i) => {
+    if (d.dayOfWeek === 5 && remainingShifts > 0) {
+      let jumatSlot = Math.min(fridayQuota, remainingShifts);
+      dailyQuotas[i] = jumatSlot;
+      remainingShifts -= jumatSlot;
+    }
   });
+
+  // Distribusikan sisa kuota ke Senin - Kamis
+  // Memastikan Kuota Harian Total = Total Shift Dibutuhkan
+  const monThuIndices = validDays.map((d, i) => d.dayOfWeek !== 5 ? i : -1).filter(i => i !== -1);
+  if (monThuIndices.length > 0 && remainingShifts > 0) {
+    let baseQuota = Math.floor(remainingShifts / monThuIndices.length);
+    monThuIndices.forEach(i => {
+      dailyQuotas[i] += baseQuota;
+      remainingShifts -= baseQuota;
+    });
+
+    // Sisa ganjil didorong ke hari Senin terlebih dahulu
+    const monIndices = monThuIndices.filter(i => validDays[i].dayOfWeek === 1);
+    const tueThuIndices = monThuIndices.filter(i => validDays[i].dayOfWeek !== 1);
+
+    while (remainingShifts > 0) {
+      for (let i of monIndices) {
+        if (remainingShifts > 0) { dailyQuotas[i]++; remainingShifts--; }
+      }
+      for (let i of tueThuIndices) {
+        if (remainingShifts > 0) { dailyQuotas[i]++; remainingShifts--; }
+      }
+    }
+  }
+
+  // Fungsi Pembantu Cek Jarak Tanggal Real (Bukan index array)
+  const checkIntervalValid = (st, currentDayNumber) => {
+    if (st.assignedDays.length === 0) return true;
+    const firstAssignedDayNum = validDays[st.assignedDays[0]].dayNumber;
+    return Math.abs(currentDayNumber - firstAssignedDayNum) >= requiredInterval;
+  };
 
   // TRACKER PASANGAN PETUGAS (VARIASI PASANGAN AGAR ADIL)
   const coAssignedPairs = new Set();
@@ -180,7 +207,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const quota = dailyQuotas[dayIdx];
 
     for (let q = 0; q < quota; q++) {
-      // Attempt A: Memenuhi semua syarat ketat (Interval N/2, Anti-Duplikasi Pasangan, No Same DayOfWeek)
+      // Attempt A: Memenuhi semua syarat ketat (Interval 14 Hari, Anti-Duplikasi Pasangan, No Same DayOfWeek)
       let candidates = randomizedStaffList
         .map((s) => staffState[s.id])
         .filter((st) => {
@@ -188,11 +215,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           if (st.assignedDays.includes(dayIdx)) return false;
           if (st.assignedDaysOfWeek.includes(day.dayOfWeek)) return false; 
 
-          // Cek Jarak Interval Piket 1 & Piket 2 = Total Hari / 2
-          if (st.assignedDays.length > 0) {
-            const firstAssignedIdx = st.assignedDays[0];
-            if (Math.abs(dayIdx - firstAssignedIdx) < requiredInterval) return false;
-          }
+          // Cek Jarak Interval Piket 1 & Piket 2 = Real 14 Hari
+          if (!checkIntervalValid(st, day.dayNumber)) return false;
 
           if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
 
@@ -212,17 +236,15 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             if (st.assignedDays.includes(dayIdx)) return false;
             if (st.assignedDaysOfWeek.includes(day.dayOfWeek)) return false;
 
-            if (st.assignedDays.length > 0) {
-              const firstAssignedIdx = st.assignedDays[0];
-              if (Math.abs(dayIdx - firstAssignedIdx) < requiredInterval) return false;
-            }
+            if (!checkIntervalValid(st, day.dayNumber)) return false;
 
             if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
             return true;
           });
       }
 
-      // Attempt C: Kendurkan jarak interval jika keterbatasan slot
+      // Attempt C: Kendurkan jarak interval jika keterbatasan slot ekstrim
+      // (Turunkan jadi minimal 10 hari jika sistem benar-benar mentok)
       if (candidates.length === 0) {
         candidates = randomizedStaffList
           .map((s) => staffState[s.id])
@@ -231,6 +253,13 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             if (st.assignedDays.includes(dayIdx)) return false;
             if (st.assignedDaysOfWeek.includes(day.dayOfWeek)) return false;
             if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
+            
+            // Jarak cadangan minimal 10 hari
+            if (st.assignedDays.length > 0) {
+                const firstDayNum = validDays[st.assignedDays[0]].dayNumber;
+                if (Math.abs(day.dayNumber - firstDayNum) < 10) return false;
+            }
+
             return true;
           });
       }
@@ -239,8 +268,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
 
       candidates.sort((a, b) => {
         if (a.count !== b.count) return a.count - b.count;
-        const distA = a.assignedDays.length > 0 ? Math.abs(dayIdx - a.assignedDays[0]) : 999;
-        const distB = b.assignedDays.length > 0 ? Math.abs(dayIdx - b.assignedDays[0]) : 999;
+        const distA = a.assignedDays.length > 0 ? Math.abs(day.dayNumber - validDays[a.assignedDays[0]].dayNumber) : 999;
+        const distB = b.assignedDays.length > 0 ? Math.abs(day.dayNumber - validDays[b.assignedDays[0]].dayNumber) : 999;
         if (distA !== distB) return distB - distA;
         return Math.random() - 0.5;
       });
@@ -260,13 +289,13 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   });
 
   // ---------------------------------------------------------------------------
-  // 4. PASS 2: PEMENUHAN BEBAN SDM (PENCEGAHAN KEKURANGAN SHIFT - GARANSI RATA 2)
+  // 4. PASS 2: PEMENUHAN BEBAN SDM (GARANSI SAPU BERSIH 100% KEBAGIAN 2 KALI)
   // ---------------------------------------------------------------------------
   randomizedStaffList.forEach((s) => {
     const st = staffState[s.id];
 
     while (st.count < targetPerStaff) {
-      // Prioritas 1: Cari hari yang memenuhi jarak interval & anti-pasangan berulang
+      // Prioritas 1: Cari hari yang memenuhi jarak interval 14 hari & anti-pasangan berulang
       let eligibleDays = validDays
         .map((d, idx) => ({ day: d, idx }))
         .filter(({ day, idx }) => {
@@ -275,10 +304,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           if (day.dayOfWeek === 5 && day.assigned.length >= fridayQuota) return false;
           if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
 
-          if (st.assignedDays.length > 0) {
-            const firstIdx = st.assignedDays[0];
-            if (Math.abs(idx - firstIdx) < requiredInterval) return false;
-          }
+          if (!checkIntervalValid(st, day.dayNumber)) return false;
 
           const hasRepeatPair = day.assigned.some((existingId) => arePairedBefore(st.id, existingId));
           if (hasRepeatPair) return false;
@@ -286,7 +312,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           return true;
         });
 
-      // Prioritas 2: Kendurkan jarak interval
+      // Prioritas 2: Kendurkan variasi pasangan
       if (eligibleDays.length === 0) {
         eligibleDays = validDays
           .map((d, idx) => ({ day: d, idx }))
@@ -295,6 +321,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             if (st.assignedDaysOfWeek.includes(day.dayOfWeek)) return false;
             if (day.dayOfWeek === 5 && day.assigned.length >= fridayQuota) return false;
             if (day.dayOfWeek === 1 && st.mondayAssigned) return false;
+            
+            if (!checkIntervalValid(st, day.dayNumber)) return false;
             return true;
           });
       }
@@ -311,6 +339,18 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           });
       }
 
+      // Prioritas 4: MUTLAK FORCE ASSIGN (Mencegah kekurangan shift)
+      // Jika sistem kehabisan opsi karena aturan terlalu ketat, PAKSA masuk ke hari paling kosong.
+      if (eligibleDays.length === 0) {
+        eligibleDays = validDays
+          .map((d, idx) => ({ day: d, idx }))
+          .filter(({ day, idx }) => {
+            if (st.assignedDays.includes(idx)) return false; 
+            if (day.dayOfWeek === 5) return false; // Jangan rusak kuota Jumat
+            return true;
+          });
+      }
+
       if (eligibleDays.length > 0) {
         eligibleDays.sort((a, b) => {
           // Utamakan meratakan jumlah petugas di hari tersebut
@@ -319,8 +359,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           }
           
           // Setelah itu maksimalkan jarak piket
-          const distA = st.assignedDays.length > 0 ? Math.abs(a.idx - st.assignedDays[0]) : 0;
-          const distB = st.assignedDays.length > 0 ? Math.abs(b.idx - st.assignedDays[0]) : 0;
+          const distA = st.assignedDays.length > 0 ? Math.abs(a.day.dayNumber - validDays[st.assignedDays[0]].dayNumber) : 0;
+          const distB = st.assignedDays.length > 0 ? Math.abs(b.day.dayNumber - validDays[st.assignedDays[0]].dayNumber) : 0;
           if (distA !== distB) return distB - distA;
           
           return Math.random() - 0.5;
@@ -338,7 +378,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
         st.assignedDaysOfWeek.push(targetDay.day.dayOfWeek);
         if (targetDay.day.dayOfWeek === 1) st.mondayAssigned = true;
       } else {
-        break; // Penanganan cadangan penuh
+        break; 
       }
     }
   });
@@ -346,15 +386,15 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   // ---------------------------------------------------------------------------
   // 5. PASS 3: GLOBAL REBALANCING (PENYEIMBANGAN BEBAN & KETERTIBAN KUOTA)
   // ---------------------------------------------------------------------------
-  validDays.forEach((day) => {
-    // Toleransi penumpukan: Senin maksimal (mondayQuota + 1), Selasa-Kamis maksimal (baseTueThuQuota + 1)
-    const maxAllowed = day.dayOfWeek === 1 ? (mondayQuota + 1) : (day.dayOfWeek === 5 ? fridayQuota : (baseTueThuQuota + 1));
+  validDays.forEach((day, dayIdx) => {
+    // Membaca kuota dinamis yang sudah presisi, ditambah toleransi 1 
+    const maxAllowed = dailyQuotas[dayIdx] + 1;
 
     while (day.assigned.length > maxAllowed) {
       const candidateDays = validDays.filter(d => 
         d.dateStr !== day.dateStr && 
         d.dayOfWeek !== 5 && // Dilarang keras membuang beban berlebih ke hari Jumat
-        ((d.dayOfWeek === 1 && d.assigned.length < mondayQuota) || (d.dayOfWeek >= 2 && d.dayOfWeek <= 4 && d.assigned.length < baseTueThuQuota))
+        (d.assigned.length < dailyQuotas[validDays.indexOf(d)])
       ).sort((a, b) => {
         if (a.dayOfWeek === 1 && b.dayOfWeek !== 1) return -1;
         if (b.dayOfWeek === 1 && a.dayOfWeek !== 1) return 1;
@@ -377,6 +417,11 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           const st = staffState[movedId];
           st.assignedDaysOfWeek = st.assignedDaysOfWeek.filter(dow => dow !== day.dayOfWeek);
           st.assignedDaysOfWeek.push(targetD.dayOfWeek);
+          
+          // Fix array index tracking when moved
+          st.assignedDays = st.assignedDays.filter(idx => idx !== dayIdx);
+          st.assignedDays.push(validDays.indexOf(targetD));
+          
           moved = true;
           break;
         }
@@ -421,6 +466,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             st.assignedDays = st.assignedDays.filter(idx => idx !== secondMondayIdx);
             st.assignedDays.push(i);
             st.assignedDaysOfWeek = st.assignedDays.map(idx => validDays[idx].dayOfWeek);
+            st.mondayAssigned = st.assignedDaysOfWeek.includes(1);
 
             // Update state SDM 2
             candSt.assignedDays = candSt.assignedDays.filter(idx => idx !== i);
@@ -436,9 +482,10 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   });
 
   // ---------------------------------------------------------------------------
-  // 7. OUTPUT STRUKTUR FIREBASE RESMI
+  // 7. OUTPUT STRUKTUR FIREBASE RESMI & VALIDASI SUPER ADMIN
   // ---------------------------------------------------------------------------
   const resultObj = {};
+  
   workDays.forEach((d) => {
     resultObj[d.dateStr] = {
       formattedLabel: d.formattedLabel,
@@ -451,6 +498,25 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
       dayOfWeek: d.dayOfWeek
     };
   });
+
+  // ---------------------------------------------------------------------------
+  // 8. METADATA VALIDASI SUPER ADMIN (Menghitung Siapa Kurang / Lebih Piket)
+  // ---------------------------------------------------------------------------
+  const validationSummary = {};
+  Object.values(staffState).forEach((st) => {
+    validationSummary[st.id] = {
+      name: st.name,
+      totalShiftCount: st.count,
+      status: st.count === targetPerStaff ? 'PAS' : (st.count < targetPerStaff ? 'KURANG' : 'LEBIH')
+    };
+  });
+
+  // Data ini bisa ditangkap oleh Frontend/React Anda untuk notifikasi/alert
+  resultObj["_SYSTEM_VALIDATION"] = {
+    targetWajibPerSDM: targetPerStaff,
+    totalHariKerja: totalEffectiveDays,
+    staffSummary: validationSummary
+  };
 
   return resultObj;
 }
