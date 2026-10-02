@@ -54,6 +54,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const dayOfWeek = dateObj.getDay();
 
     if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Exclude Sabtu & Minggu
+      // PERBAIKAN: Sintaks Template Literal Diperbaiki
       const dateStr = `\({targetYear}-\){String(targetMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const formattedLabel = `\({d}\){namaBulan[targetMonth - 1]} ${targetYear}`;
       const dayName = namaHari[dayOfWeek];
