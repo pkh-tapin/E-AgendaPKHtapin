@@ -241,7 +241,13 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         delete swappedInfoA[selectedStaffA];
 
         await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/assigned`), newAssignedA);
-        await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`), swappedInfoA);
+        
+        // PENGAMANAN ERROR FIREBASE (TIDAK BOLEH SET OBJECT KOSONG KE FIREBASE)
+        if (Object.keys(swappedInfoA).length === 0) {
+          await remove(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`));
+        } else {
+          await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`), swappedInfoA);
+        }
 
         showToast(`Petugas ${getStaffName(selectedStaffA)} berhasil dihapus dari tanggal ${dayNum}!`, 'success');
         setSwapModalOpen(false);
@@ -258,6 +264,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     e.preventDefault();
     if (!selectedDateB || !selectedStaffB) return showToast('Pilih tanggal & petugas pasangan tukar!', 'error');
     if (selectedDateA === selectedDateB && selectedStaffA === selectedStaffB) return showToast('Tidak bisa menukar petugas yang sama!', 'error');
+    if (selectedDateA === selectedDateB) return showToast('Harap pilih tanggal yang berbeda untuk menukar!', 'error');
 
     const dayNumA = new Date(selectedDateA).getDate();
     const dayNumB = new Date(selectedDateB).getDate();
@@ -283,10 +290,20 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         delete swappedInfoB[selectedStaffB];
 
         await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/assigned`), newAssignedA);
-        await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`), swappedInfoA);
+        
+        if (Object.keys(swappedInfoA).length === 0) {
+           await remove(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`));
+        } else {
+           await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`), swappedInfoA);
+        }
 
         await set(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/assigned`), newAssignedB);
-        await set(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/swappedInfo`), swappedInfoB);
+        
+        if (Object.keys(swappedInfoB).length === 0) {
+           await remove(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/swappedInfo`));
+        } else {
+           await set(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/swappedInfo`), swappedInfoB);
+        }
 
         showToast('Admin berhasil menukar jadwal secara langsung (Tanpa Tanda)!', 'success');
         setSwapModalOpen(false);
@@ -432,7 +449,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     }
 
     // HITUNG SLOT & FREKUENSI UNTUK ATURAN KETAT
-    const workingDays = Object.values(currentSchedule).filter(d => !d.isHoliday && d.dateStr);
+    // PENGAMANAN FILTER: Memastikan kita hanya mengambil Object tanggal (mengabaikan boolean isLocked)
+    const workingDays = Object.values(currentSchedule).filter(d => d && typeof d === 'object' && !d.isHoliday && d.dateStr);
     let totalSlots = 0;
     let staffCounts = {};
     
@@ -730,90 +748,92 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                         }`}>
                           Tanggal {dayData.dayNumber}
                         </span>
-                        
-                        {/* TOMBOL TAMBAH PETUGAS KHUSUS SUPER ADMIN */}
-                        {isSuperAdmin && !dayData.isHoliday && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenAddModal(dayData.dateStr);
-                            }}
-                            className="absolute right-0 top-0 bg-emerald-600 hover:bg-emerald-500 text-white w-5 h-5 rounded-md text-[12px] font-bold flex items-center justify-center shadow-md cursor-pointer transition-all"
-                            title="Tambah Petugas ke Tanggal Ini"
-                          >
-                            +
-                          </button>
-                        )}
                       </div>
 
                       <div className="space-y-2 relative z-10">
                         {!dayData.isHoliday ? (
-                          assignedList.length > 0 ? (
-                            assignedList.map((staffId) => {
-                              const isSwapped = !!swappedMap[staffId];
-                              const swapMeta = swappedMap[staffId];
+                          <>
+                            {assignedList.length > 0 ? (
+                              assignedList.map((staffId) => {
+                                const isSwapped = !!swappedMap[staffId];
+                                const swapMeta = swappedMap[staffId];
 
-                              const pendingReq = pendingRequests.find(
-                                (r) => (r.staffA === staffId && r.dateA === dayData.dateStr) || (r.staffB === staffId && r.dateB === dayData.dateStr)
-                              );
+                                const pendingReq = pendingRequests.find(
+                                  (r) => (r.staffA === staffId && r.dateA === dayData.dateStr) || (r.staffB === staffId && r.dateB === dayData.dateStr)
+                                );
 
-                              const isStaffA = pendingReq?.staffA === staffId;
-                              const partnerStaffId = pendingReq ? (isStaffA ? pendingReq.staffB : pendingReq.staffA) : '';
-                              const partnerDayNum = pendingReq ? (isStaffA ? pendingReq.dayNumberB : pendingReq.dayNumberA) : '';
+                                const isStaffA = pendingReq?.staffA === staffId;
+                                const partnerStaffId = pendingReq ? (isStaffA ? pendingReq.staffB : pendingReq.staffA) : '';
+                                const partnerDayNum = pendingReq ? (isStaffA ? pendingReq.dayNumberB : pendingReq.dayNumberA) : '';
 
-                              const showSwapHighlight = (!isAdmin && !isSuperAdmin) && isSwapped;
-                              const isFilteredSdm = filterStaffId && filterStaffId === staffId;
+                                const showSwapHighlight = (!isAdmin && !isSuperAdmin) && isSwapped;
+                                const isFilteredSdm = filterStaffId && filterStaffId === staffId;
 
-                              return (
-                                <button
-                                  key={staffId}
-                                  onClick={() => handleCardClick(dayData.dateStr, staffId)}
-                                  className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col justify-center min-h-[44px] group ${isPublic ? 'cursor-default' : 'cursor-pointer'} ${
-                                    isFilteredSdm
-                                      ? 'bg-emerald-600/40 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] ring-2 ring-emerald-400'
-                                      : pendingReq
-                                      ? 'bg-amber-950/80 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.3)] animate-pulse'
-                                      : showSwapHighlight
-                                      ? 'bg-orange-950/80 border-orange-500/70 shadow-[0_0_10px_rgba(249,115,22,0.2)]'
-                                      : isToday
-                                      ? `bg-cyan-950/40 border-cyan-500/30 ${isPublic ? '' : 'hover:bg-cyan-900/60'}`
-                                      : `bg-slate-950/80 border-white/10 ${isPublic ? '' : 'hover:bg-indigo-600/30'}`
-                                  }`}
-                                >
-                                  <div className="flex justify-between items-center w-full gap-1.5">
-                                    <span className={`text-[11px] font-bold tracking-wide break-words leading-tight uppercase block flex-1 ${
-                                      isFilteredSdm ? 'text-emerald-200 font-extrabold' : 'text-white'
-                                    }`}>
-                                      {getStaffName(staffId)}
-                                    </span>
-                                    <FontAwesomeIcon icon={faExchangeAlt} className={`text-[10px] text-amber-400 shrink-0 opacity-80 sm:opacity-0 ${isPublic ? 'hidden' : 'group-hover:opacity-100'} transition-opacity`} />
-                                  </div>
-
-                                  {/* KETERANGAN MENUNGGU TUKAR */}
-                                  {pendingReq && (
-                                    <div className="mt-1 space-y-0.5">
-                                      <span className="text-[9px] font-bold text-amber-300 block leading-tight break-words">
-                                        ⇄ Usulan Tukar dgn {getStaffName(partnerStaffId)} tgl {partnerDayNum}
+                                return (
+                                  <button
+                                    key={staffId}
+                                    onClick={() => handleCardClick(dayData.dateStr, staffId)}
+                                    className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col justify-center min-h-[44px] group ${isPublic ? 'cursor-default' : 'cursor-pointer'} ${
+                                      isFilteredSdm
+                                        ? 'bg-emerald-600/40 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] ring-2 ring-emerald-400'
+                                        : pendingReq
+                                        ? 'bg-amber-950/80 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.3)] animate-pulse'
+                                        : showSwapHighlight
+                                        ? 'bg-orange-950/80 border-orange-500/70 shadow-[0_0_10px_rgba(249,115,22,0.2)]'
+                                        : isToday
+                                        ? `bg-cyan-950/40 border-cyan-500/30 ${isPublic ? '' : 'hover:bg-cyan-900/60'}`
+                                        : `bg-slate-950/80 border-white/10 ${isPublic ? '' : 'hover:bg-indigo-600/30'}`
+                                    }`}
+                                  >
+                                    <div className="flex justify-between items-center w-full gap-1.5">
+                                      <span className={`text-[11px] font-bold tracking-wide break-words leading-tight uppercase block flex-1 ${
+                                        isFilteredSdm ? 'text-emerald-200 font-extrabold' : 'text-white'
+                                      }`}>
+                                        {getStaffName(staffId)}
                                       </span>
-                                      <span className="text-[9px] font-extrabold text-amber-400 flex items-center gap-1">
-                                        <FontAwesomeIcon icon={faHourglassHalf} className="animate-spin text-[8px]" />
-                                        <span>{renderCountdown(pendingReq.timestamp)}</span>
-                                      </span>
+                                      <FontAwesomeIcon icon={faExchangeAlt} className={`text-[10px] text-amber-400 shrink-0 opacity-80 sm:opacity-0 ${isPublic ? 'hidden' : 'group-hover:opacity-100'} transition-opacity`} />
                                     </div>
-                                  )}
 
-                                  {/* TANDA ORANGE BERTUKAR */}
-                                  {(!isAdmin && !isSuperAdmin) && !pendingReq && isSwapped && (
-                                    <span className="text-[9px] font-bold text-orange-300 bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-400/40 inline-block mt-1 break-words leading-tight">
-                                      🔄 Tukar dgn {getStaffName(swapMeta.original)} tgl {swapMeta.swappedDateNum || swapMeta.originalDateNum}
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })
-                          ) : (
-                            <p className="text-[10px] text-slate-500 italic py-2 text-center">Belum ada petugas</p>
-                          )
+                                    {/* KETERANGAN MENUNGGU TUKAR */}
+                                    {pendingReq && (
+                                      <div className="mt-1 space-y-0.5">
+                                        <span className="text-[9px] font-bold text-amber-300 block leading-tight break-words">
+                                          ⇄ Usulan Tukar dgn {getStaffName(partnerStaffId)} tgl {partnerDayNum}
+                                        </span>
+                                        <span className="text-[9px] font-extrabold text-amber-400 flex items-center gap-1">
+                                          <FontAwesomeIcon icon={faHourglassHalf} className="animate-spin text-[8px]" />
+                                          <span>{renderCountdown(pendingReq.timestamp)}</span>
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {/* TANDA ORANGE BERTUKAR */}
+                                    {(!isAdmin && !isSuperAdmin) && !pendingReq && isSwapped && (
+                                      <span className="text-[9px] font-bold text-orange-300 bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-400/40 inline-block mt-1 break-words leading-tight">
+                                        🔄 Tukar dgn {getStaffName(swapMeta.original)} tgl {swapMeta.swappedDateNum || swapMeta.originalDateNum}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <p className="text-[10px] text-slate-500 italic py-2 text-center">Belum ada petugas</p>
+                            )}
+                            
+                            {/* TOMBOL TAMBAH PETUGAS KHUSUS SUPER ADMIN (DITAMPILKAN SANGAT JELAS DI BAWAH DAFTAR) */}
+                            {isSuperAdmin && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenAddModal(dayData.dateStr);
+                                }}
+                                className="mt-1 w-full py-2 rounded-lg border border-dashed border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/20 text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                title="Tambah Petugas ke Tanggal Ini"
+                              >
+                                + Tambah Petugas
+                              </button>
+                            )}
+                          </>
                         ) : (
                           <div className="text-center py-2">
                             <span className="text-xs font-black text-rose-200 block uppercase tracking-wider leading-tight">
