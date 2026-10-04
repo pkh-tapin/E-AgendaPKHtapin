@@ -76,7 +76,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const [swapLogs, setSwapLogs] = useState([]);
 
   // ---------------------------------------------------------------------------
-  // 4. STATE MODAL TUKAR & REALTIME TIMER & TAMBAH PETUGAS (SUPER ADMIN)
+  // 4. STATE MODAL TUKAR & REALTIME TIMER & TAMBAH PETUGAS (ADMIN)
   // ---------------------------------------------------------------------------
   const [swapModalOpen, setSwapModalOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -90,7 +90,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const [pendingRequests, setPendingRequests] = useState([]);
   const [nowTimestamp, setNowTimestamp] = useState(Date.now());
 
-  // STATE UNTUK TAMBAH PETUGAS KHUSUS SUPER ADMIN
+  // STATE UNTUK TAMBAH PETUGAS KHUSUS ADMIN
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedDateToAdd, setSelectedDateToAdd] = useState('');
   const [selectedStaffToAdd, setSelectedStaffToAdd] = useState('');
@@ -144,7 +144,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   }, [currentMonthKey]);
 
   // ---------------------------------------------------------------------------
-  // 5. HANDLER GENERATE, KUNCI, & RESET JADWAL (ADMIN / SUPER ADMIN)
+  // 5. HANDLER GENERATE, KUNCI, & RESET JADWAL (ADMIN)
   // ---------------------------------------------------------------------------
   const handleGeneratePiket = () => {
     if (!isAdmin) return showToast('Akses terkunci. Silakan masuk sebagai Admin!', 'error');
@@ -225,7 +225,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     }
   };
 
-  // FITUR HAPUS PETUGAS SATUAN DARI TANGGAL PIKET (ADMIN & SUPER ADMIN)
+  // FITUR HAPUS PETUGAS SATUAN DARI TANGGAL PIKET (ADMIN)
   const handleRemoveStaffFromDate = async () => {
     if (!isAdmin) return showToast('Akses khusus Admin!', 'error');
     if (!selectedDateA || !selectedStaffA) return;
@@ -445,27 +445,28 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     const scheduleData = currentSchedule[selectedDateToAdd] || {};
     const assigned = Array.isArray(scheduleData.assigned) ? scheduleData.assigned : [];
 
+    // Validasi Basic: Apakah orang ini sudah piket di tanggal yang dipilih?
     if (assigned.includes(selectedStaffToAdd)) {
       return showToast('Petugas tersebut sudah piket di tanggal ini!', 'error');
     }
 
-    // HITUNG SLOT & FREKUENSI UNTUK ATURAN KETAT
-    // PENGAMANAN FILTER: Memastikan kita hanya mengambil Object tanggal (mengabaikan boolean isLocked)
+    // HITUNG FREKUENSI UNTUK ATURAN KETAT
     const workingDays = Object.values(currentSchedule).filter(d => d && typeof d === 'object' && !d.isHoliday && d.dateStr);
-    let totalSlots = 0;
     let staffCounts = {};
     
     workingDays.forEach(day => {
       const dayAssigned = Array.isArray(day.assigned) ? day.assigned : [];
-      totalSlots += dayAssigned.length;
       dayAssigned.forEach(id => {
         staffCounts[id] = (staffCounts[id] || 0) + 1;
       });
     });
 
     const activeStaffCount = staffList.length || 1;
-    // Rata-rata maksimal (Jatah) per orang dalam bulan ini
-    const avgPerPerson = Math.ceil(totalSlots / activeStaffCount);
+    // SMART CALCULATION FIX: Gunakan standar target dari config untuk memastikan jatah tidak menyusut saat ada yang dihapus.
+    const staffPerDay = config.staffPerDay ? parseInt(config.staffPerDay, 10) : 2;
+    const expectedTotalSlots = workingDays.length * staffPerDay;
+    const avgPerPerson = Math.ceil(expectedTotalSlots / activeStaffCount);
+    
     const currentCount = staffCounts[selectedStaffToAdd] || 0;
 
     // VALIDASI KETAT 1 (HARD BLOCK): JIKA LEBIH JATAH MAKA KUNCI MATI (TIDAK BISA DISIMPAN)
@@ -487,7 +488,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       }
     });
 
-    // PEMBERITAHUAN JARAK & JATAH SEBELUM MENYIMPAN (Tetap bisa dilanjutkan oleh Admin)
+    // PEMBERITAHUAN JARAK SEBELUM MENYIMPAN (Tetap bisa dilanjutkan oleh Admin jika setuju)
     if (isTooClose) {
       if (!window.confirm(`PERINGATAN LOGIKA:\n\nJarak hari piket ${getStaffName(selectedStaffToAdd)} terlalu dekat (≤ 2 Hari) dengan jadwal dia yang lain!\n\nKarena jatahnya belum penuh (${currentCount}/${avgPerPerson}), Anda tetap BISA MENYIMPANNYA secara paksa.\nTetap lanjutkan simpan?`)) {
         return;
@@ -822,14 +823,14 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                               <p className="text-[10px] text-slate-500 italic py-2 text-center">Belum ada petugas</p>
                             )}
                             
-                            {/* TOMBOL TAMBAH PETUGAS KHUSUS ADMIN - TAMPIL ELEGAN DI BAWAH DAFTAR NAMA */}
+                            {/* TOMBOL TAMBAH PETUGAS KHUSUS ADMIN (TIDAK MUNCUL JIKA DIKUNCI) */}
                             {isAdmin && !isScheduleLocked && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleOpenAddModal(dayData.dateStr);
                                 }}
-                                className="mt-2 w-full py-1.5 rounded-xl border border-dashed border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                                className="mt-2 w-full py-1.5 rounded-xl border border-dashed border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm relative z-20"
                                 title="Tambah Petugas Baru Secara Manual ke Tanggal Ini"
                               >
                                 <FontAwesomeIcon icon={faPlus} className="text-[9px]" />
