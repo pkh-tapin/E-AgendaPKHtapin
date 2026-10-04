@@ -20,7 +20,8 @@ import {
   faSearch,
   faUser,
   faFilter,
-  faCalendarCheck
+  faCalendarCheck,
+  faPlus
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm, isSuperAdmin }) {
@@ -467,13 +468,13 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     const avgPerPerson = Math.ceil(totalSlots / activeStaffCount);
     const currentCount = staffCounts[selectedStaffToAdd] || 0;
 
-    // VALIDASI KETAT 1: JIKA LEBIH JATAH MAKA KUNCI MATI (TIDAK BISA DISIMPAN)
+    // VALIDASI KETAT 1 (HARD BLOCK): JIKA LEBIH JATAH MAKA KUNCI MATI (TIDAK BISA DISIMPAN)
     if (currentCount >= avgPerPerson) {
-      showToast(`TIDAK BISA DISIMPAN! Jatah piket ${getStaffName(selectedStaffToAdd)} sudah maksimal (Batas: ${avgPerPerson} kali bulan ini). Semua harus terbagi rata!`, 'error');
-      return;
+      showToast(`TIDAK BISA DISIMPAN! Jatah piket ${getStaffName(selectedStaffToAdd)} sudah penuh (Batas: ${avgPerPerson} kali bulan ini). Semua harus terbagi rata!`, 'error');
+      return; // Berhenti eksekusi, blokir penyimpanan
     }
 
-    // VALIDASI KETAT 2: CEK JARAK TERDEKAT (Pemberitahuan jika <= 2 hari)
+    // VALIDASI KETAT 2 (SOFT BLOCK): CEK JARAK TERDEKAT (Pemberitahuan jika <= 2 hari)
     let isTooClose = false;
     const addDateObj = new Date(selectedDateToAdd);
     workingDays.forEach(day => {
@@ -486,13 +487,13 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       }
     });
 
-    // PEMBERITAHUAN JARAK & JATAH SEBELUM MENYIMPAN
+    // PEMBERITAHUAN JARAK & JATAH SEBELUM MENYIMPAN (Tetap bisa dilanjutkan oleh Super Admin)
     if (isTooClose) {
-      if (!window.confirm(`PERINGATAN KETAT:\n\nJarak piket ${getStaffName(selectedStaffToAdd)} terlalu dekat dengan jadwal dia yang lain!\nDia sudah piket ${currentCount} kali bulan ini.\n\nKarena belum melebihi batas maksimal (${avgPerPerson} kali), Anda BISA MENYIMPANNYA.\nTetap lanjutkan simpan?`)) {
+      if (!window.confirm(`PERINGATAN LOGIKA:\n\nJarak hari piket ${getStaffName(selectedStaffToAdd)} terlalu dekat (<= 2 Hari) dengan jadwal dia yang lain!\n\nKarena jatahnya belum penuh (${currentCount}/${avgPerPerson}), Anda tetap BISA MENYIMPANNYA secara paksa.\nTetap lanjutkan simpan?`)) {
         return;
       }
     } else {
-      if (!window.confirm(`Konfirmasi:\nPetugas ${getStaffName(selectedStaffToAdd)} baru piket ${currentCount} kali (Batas Maksimal: ${avgPerPerson} kali).\n\nLanjutkan simpan ke tanggal ${new Date(selectedDateToAdd).getDate()}?`)) {
+      if (!window.confirm(`Konfirmasi:\nTambahkan ${getStaffName(selectedStaffToAdd)} ke tanggal ${new Date(selectedDateToAdd).getDate()}?\n(Saat ini dia sudah bertugas ${currentCount} kali, batas bulan ini: ${avgPerPerson} kali).`)) {
           return;
       }
     }
@@ -753,6 +754,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                       <div className="space-y-2 relative z-10">
                         {!dayData.isHoliday ? (
                           <>
+                            {/* DAFTAR NAMA PETUGAS YANG SUDAH ADA */}
                             {assignedList.length > 0 ? (
                               assignedList.map((staffId) => {
                                 const isSwapped = !!swappedMap[staffId];
@@ -820,17 +822,18 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                               <p className="text-[10px] text-slate-500 italic py-2 text-center">Belum ada petugas</p>
                             )}
                             
-                            {/* TOMBOL TAMBAH PETUGAS KHUSUS SUPER ADMIN (DITAMPILKAN SANGAT JELAS DI BAWAH DAFTAR) */}
-                            {isSuperAdmin && (
+                            {/* TOMBOL TAMBAH PETUGAS KHUSUS SUPER ADMIN - DITAMPILKAN DI BAWAH DAFTAR NAMA */}
+                            {isSuperAdmin && !isScheduleLocked && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleOpenAddModal(dayData.dateStr);
                                 }}
-                                className="mt-1 w-full py-2 rounded-lg border border-dashed border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/20 text-[10px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                title="Tambah Petugas ke Tanggal Ini"
+                                className="mt-2 w-full py-2 rounded-xl border-2 border-dashed border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500 text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                                title="Tambah Petugas Baru Secara Manual ke Tanggal Ini"
                               >
-                                + Tambah Petugas
+                                <FontAwesomeIcon icon={faPlus} className="text-[9px]" />
+                                <span>Tambah Petugas</span>
                               </button>
                             )}
                           </>
@@ -1226,21 +1229,21 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             
             <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
               <FontAwesomeIcon icon={faUserCheck} className="text-emerald-400" />
-              <span>Tambah Petugas Piket</span>
+              <span>Tambah Petugas Manual</span>
             </h3>
             <p className="text-[11px] text-emerald-300 font-semibold bg-emerald-950/50 p-2 rounded-xl border border-emerald-500/30">
-              Tanggal Target: <strong>{new Date(selectedDateToAdd).getDate()} {namaBulan[viewMonth - 1]} {viewYear}</strong>
+              Pilih petugas untuk ditambahkan ke: <strong>Tanggal {new Date(selectedDateToAdd).getDate()} {namaBulan[viewMonth - 1]} {viewYear}</strong>
             </p>
 
             <form onSubmit={handleAddStaff} className="space-y-4 pt-1">
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1.5">Pilih Petugas untuk Ditambahkan</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1.5">Daftar Semua Petugas Terdaftar</label>
                 <select
                   value={selectedStaffToAdd}
                   onChange={(e) => setSelectedStaffToAdd(e.target.value)}
                   className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-emerald-500 cursor-pointer"
                 >
-                  <option value="">-- Pilih Petugas --</option>
+                  <option value="">-- Pilih Petugas yang Akan Ditambahkan --</option>
                   {staffList.map((s) => (
                     <option key={s.id || s.key} value={s.id || s.key}>
                       {s.name || s.NAMA || s.nama || s.id}
@@ -1251,9 +1254,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
               
               <button
                 type="submit"
-                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-3d-button transition-all cursor-pointer"
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-3d-button transition-all cursor-pointer flex items-center justify-center gap-2"
               >
-                Simpan Penambahan
+                <FontAwesomeIcon icon={faPlus} />
+                <span>Validasi & Simpan Penambahan</span>
               </button>
             </form>
           </div>
