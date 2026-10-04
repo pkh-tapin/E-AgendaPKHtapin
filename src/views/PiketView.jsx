@@ -23,12 +23,12 @@ import {
   faCalendarCheck
 } from '@fortawesome/free-solid-svg-icons';
 
-export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
+export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm, isSuperAdmin }) {
   const { showToast } = useToast();
   const now = new Date();
 
   // PENENTUAN MODE PUBLIK (Hanya bisa melihat)
-  const isPublic = !isAdmin && !isSdm;
+  const isPublic = !isAdmin && !isSdm && !isSuperAdmin;
 
   // ---------------------------------------------------------------------------
   // 1. STATE FILTER KALENDER & DYNAMIC MONTH KEY
@@ -75,7 +75,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const [swapLogs, setSwapLogs] = useState([]);
 
   // ---------------------------------------------------------------------------
-  // 4. STATE MODAL TUKAR & REALTIME TIMER
+  // 4. STATE MODAL TUKAR & REALTIME TIMER & TAMBAH PETUGAS (SUPER ADMIN)
   // ---------------------------------------------------------------------------
   const [swapModalOpen, setSwapModalOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -88,6 +88,11 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
   const [pendingRequests, setPendingRequests] = useState([]);
   const [nowTimestamp, setNowTimestamp] = useState(Date.now());
+
+  // STATE UNTUK TAMBAH PETUGAS KHUSUS SUPER ADMIN
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [selectedDateToAdd, setSelectedDateToAdd] = useState('');
+  const [selectedStaffToAdd, setSelectedStaffToAdd] = useState('');
 
   // Realtime Timer 1 Detik
   useEffect(() => {
@@ -138,10 +143,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   }, [currentMonthKey]);
 
   // ---------------------------------------------------------------------------
-  // 5. HANDLER GENERATE, KUNCI, & RESET JADWAL (ADMIN)
+  // 5. HANDLER GENERATE, KUNCI, & RESET JADWAL (ADMIN & SUPER ADMIN)
   // ---------------------------------------------------------------------------
   const handleGeneratePiket = () => {
-    if (!isAdmin) return showToast('Akses terkunci. Silakan masuk sebagai Admin!', 'error');
+    if (!isAdmin && !isSuperAdmin) return showToast('Akses terkunci. Silakan masuk sebagai Admin!', 'error');
     if (isScheduleLocked) return showToast('Jadwal bulan ini DIKUNCI. Buka kunci terlebih dahulu!', 'error');
     if (!staffList || staffList.length < 5) return showToast('Jumlah SDM minimal 5 orang!', 'error');
 
@@ -166,7 +171,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   };
 
   const handleToggleLockSchedule = () => {
-    if (!isAdmin) return showToast('Hanya Admin yang dapat mengunci jadwal!', 'error');
+    if (!isAdmin && !isSuperAdmin) return showToast('Hanya Admin yang dapat mengunci jadwal!', 'error');
     const newLockStatus = !isScheduleLocked;
 
     update(ref(db, `schedules/${currentMonthKey}`), { isLocked: newLockStatus });
@@ -175,7 +180,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
   // FITUR RESET SELURUH JADWAL BULAN INI (ADMIN)
   const handleResetMonthlySchedule = async () => {
-    if (!isAdmin) return showToast('Akses terkunci. Khusus Admin!', 'error');
+    if (!isAdmin && !isSuperAdmin) return showToast('Akses terkunci. Khusus Admin!', 'error');
     if (isScheduleLocked) return showToast('Jadwal bulan ini DIKUNCI. Buka kunci terlebih dahulu!', 'error');
 
     if (window.confirm(`PERHATIAN! Apakah Anda yakin ingin MERESET/MENGHAPUS SELURUH JADWAL PIKET bulan ${namaBulan[viewMonth - 1]} ${viewYear}?`)) {
@@ -219,9 +224,9 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     }
   };
 
-  // FITUR HAPUS PETUGAS SATUAN DARI TANGGAL PIKET (ADMIN)
+  // FITUR HAPUS PETUGAS SATUAN DARI TANGGAL PIKET (ADMIN & SUPER ADMIN)
   const handleRemoveStaffFromDate = async () => {
-    if (!isAdmin) return showToast('Akses khusus Admin!', 'error');
+    if (!isAdmin && !isSuperAdmin) return showToast('Akses khusus Admin atau Super Admin!', 'error');
     if (!selectedDateA || !selectedStaffA) return;
 
     const dayNum = new Date(selectedDateA).getDate();
@@ -257,8 +262,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     const dayNumA = new Date(selectedDateA).getDate();
     const dayNumB = new Date(selectedDateB).getDate();
 
-    // AKSI ADMIN: EKSEKUSI BERSIH TANPA MENCATAT SWAPPED INFO
-    if (isAdmin) {
+    // AKSI ADMIN / SUPER ADMIN: EKSEKUSI BERSIH TANPA MENCATAT SWAPPED INFO
+    if (isAdmin || isSuperAdmin) {
       try {
         const scheduleA = currentSchedule[selectedDateA] || {};
         const scheduleB = currentSchedule[selectedDateB] || {};
@@ -377,7 +382,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
   // HAPUS LOG SATUAN (ADMIN)
   const handleDeleteLog = async (logId) => {
-    if (!isAdmin) return showToast('Akses terbatas khusus Admin!', 'error');
+    if (!isAdmin && !isSuperAdmin) return showToast('Akses terbatas khusus Admin/Super Admin!', 'error');
     if (window.confirm('Hapus riwayat log tukar ini dari sistem?')) {
       await remove(ref(db, `swaps/${logId}`));
       showToast('Log tukar berhasil dihapus!', 'info');
@@ -386,7 +391,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
   // HAPUS SEMUA LOG (ADMIN)
   const handleClearAllLogs = async () => {
-    if (!isAdmin) return showToast('Akses terbatas khusus Admin!', 'error');
+    if (!isAdmin && !isSuperAdmin) return showToast('Akses terbatas khusus Admin/Super Admin!', 'error');
     if (window.confirm('PERHATIAN! Apakah Anda yakin ingin MENGHAPUS SELURUH LOG TUKAR?')) {
       await remove(ref(db, 'swaps'));
       showToast('Seluruh log tukar berhasil dibersihkan!', 'info');
@@ -403,6 +408,86 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
 
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  };
+
+  // ---------------------------------------------------------------------------
+  // 6.5. HANDLER TAMBAH PETUGAS PIKET (KHUSUS SUPER ADMIN DENGAN LOGIKA KETAT)
+  // ---------------------------------------------------------------------------
+  const handleOpenAddModal = (dateStr) => {
+    setSelectedDateToAdd(dateStr);
+    setSelectedStaffToAdd('');
+    setAddModalOpen(true);
+  };
+
+  const handleAddStaff = async (e) => {
+    e.preventDefault();
+    if (!isSuperAdmin) return showToast('Akses ditolak! Khusus Super Admin.', 'error');
+    if (!selectedDateToAdd || !selectedStaffToAdd) return showToast('Pilih petugas yang akan ditambahkan!', 'error');
+
+    const scheduleData = currentSchedule[selectedDateToAdd] || {};
+    const assigned = Array.isArray(scheduleData.assigned) ? scheduleData.assigned : [];
+
+    if (assigned.includes(selectedStaffToAdd)) {
+      return showToast('Petugas tersebut sudah piket di tanggal ini!', 'error');
+    }
+
+    // HITUNG SLOT & FREKUENSI UNTUK ATURAN KETAT
+    const workingDays = Object.values(currentSchedule).filter(d => !d.isHoliday && d.dateStr);
+    let totalSlots = 0;
+    let staffCounts = {};
+    
+    workingDays.forEach(day => {
+      const dayAssigned = Array.isArray(day.assigned) ? day.assigned : [];
+      totalSlots += dayAssigned.length;
+      dayAssigned.forEach(id => {
+        staffCounts[id] = (staffCounts[id] || 0) + 1;
+      });
+    });
+
+    const activeStaffCount = staffList.length || 1;
+    // Rata-rata maksimal (Jatah) per orang dalam bulan ini
+    const avgPerPerson = Math.ceil(totalSlots / activeStaffCount);
+    const currentCount = staffCounts[selectedStaffToAdd] || 0;
+
+    // VALIDASI KETAT 1: JIKA LEBIH JATAH MAKA KUNCI MATI (TIDAK BISA DISIMPAN)
+    if (currentCount >= avgPerPerson) {
+      showToast(`TIDAK BISA DISIMPAN! Jatah piket ${getStaffName(selectedStaffToAdd)} sudah maksimal (Batas: ${avgPerPerson} kali bulan ini). Semua harus terbagi rata!`, 'error');
+      return;
+    }
+
+    // VALIDASI KETAT 2: CEK JARAK TERDEKAT (Pemberitahuan jika <= 2 hari)
+    let isTooClose = false;
+    const addDateObj = new Date(selectedDateToAdd);
+    workingDays.forEach(day => {
+      if ((day.assigned || []).includes(selectedStaffToAdd)) {
+        const dayObj = new Date(day.dateStr);
+        const diffDays = Math.abs(addDateObj - dayObj) / (1000 * 60 * 60 * 24);
+        if (diffDays <= 2) {
+          isTooClose = true;
+        }
+      }
+    });
+
+    // PEMBERITAHUAN JARAK & JATAH SEBELUM MENYIMPAN
+    if (isTooClose) {
+      if (!window.confirm(`PERINGATAN KETAT:\n\nJarak piket ${getStaffName(selectedStaffToAdd)} terlalu dekat dengan jadwal dia yang lain!\nDia sudah piket ${currentCount} kali bulan ini.\n\nKarena belum melebihi batas maksimal (${avgPerPerson} kali), Anda BISA MENYIMPANNYA.\nTetap lanjutkan simpan?`)) {
+        return;
+      }
+    } else {
+      if (!window.confirm(`Konfirmasi:\nPetugas ${getStaffName(selectedStaffToAdd)} baru piket ${currentCount} kali (Batas Maksimal: ${avgPerPerson} kali).\n\nLanjutkan simpan ke tanggal ${new Date(selectedDateToAdd).getDate()}?`)) {
+          return;
+      }
+    }
+
+    // PROSES SIMPAN PENAMBAHAN KE DATABASE
+    try {
+      const newAssigned = [...assigned, selectedStaffToAdd];
+      await set(ref(db, `schedules/${currentMonthKey}/${selectedDateToAdd}/assigned`), newAssigned);
+      showToast(`Berhasil menambahkan ${getStaffName(selectedStaffToAdd)} ke tanggal ${new Date(selectedDateToAdd).getDate()}!`, 'success');
+      setAddModalOpen(false);
+    } catch (err) {
+      showToast('Gagal menambahkan petugas ke database', 'error');
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -515,8 +600,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             <span>Export PDF</span>
           </button>
 
-          {/* SUB-MENU LOG TUKAR PIKET (ADMIN) */}
-          {isAdmin && (
+          {/* SUB-MENU LOG TUKAR PIKET (ADMIN / SUPER ADMIN) */}
+          {(isAdmin || isSuperAdmin) && (
             <button
               onClick={() => setLogsSubMenuOpen(true)}
               className="px-3 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-white font-extrabold text-[11px] sm:text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all"
@@ -526,8 +611,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             </button>
           )}
 
-          {/* Lock/Unlock Schedule (Admin) */}
-          {isAdmin && (
+          {/* Lock/Unlock Schedule (Admin / Super Admin) */}
+          {(isAdmin || isSuperAdmin) && (
             <button
               onClick={handleToggleLockSchedule}
               className={`px-3 py-2 rounded-xl font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
@@ -541,8 +626,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             </button>
           )}
 
-          {/* Reset Schedule (Admin) */}
-          {isAdmin && (
+          {/* Reset Schedule (Admin / Super Admin) */}
+          {(isAdmin || isSuperAdmin) && (
             <button
               onClick={handleResetMonthlySchedule}
               className="px-3 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-300 font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
@@ -553,8 +638,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             </button>
           )}
 
-          {/* Acak Piket (Admin) */}
-          {isAdmin && (
+          {/* Acak Piket (Admin / Super Admin) */}
+          {(isAdmin || isSuperAdmin) && (
             <button
               onClick={() => setGenModalOpen(true)}
               className={`col-span-2 sm:col-span-1 px-4 py-2 rounded-xl font-bold text-xs shadow-3d-button flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
@@ -645,6 +730,20 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                         }`}>
                           Tanggal {dayData.dayNumber}
                         </span>
+                        
+                        {/* TOMBOL TAMBAH PETUGAS KHUSUS SUPER ADMIN */}
+                        {isSuperAdmin && !dayData.isHoliday && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenAddModal(dayData.dateStr);
+                            }}
+                            className="absolute right-0 top-0 bg-emerald-600 hover:bg-emerald-500 text-white w-5 h-5 rounded-md text-[12px] font-bold flex items-center justify-center shadow-md cursor-pointer transition-all"
+                            title="Tambah Petugas ke Tanggal Ini"
+                          >
+                            +
+                          </button>
+                        )}
                       </div>
 
                       <div className="space-y-2 relative z-10">
@@ -662,7 +761,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                               const partnerStaffId = pendingReq ? (isStaffA ? pendingReq.staffB : pendingReq.staffA) : '';
                               const partnerDayNum = pendingReq ? (isStaffA ? pendingReq.dayNumberB : pendingReq.dayNumberA) : '';
 
-                              const showSwapHighlight = !isAdmin && isSwapped;
+                              const showSwapHighlight = (!isAdmin && !isSuperAdmin) && isSwapped;
                               const isFilteredSdm = filterStaffId && filterStaffId === staffId;
 
                               return (
@@ -704,7 +803,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                   )}
 
                                   {/* TANDA ORANGE BERTUKAR */}
-                                  {!isAdmin && !pendingReq && isSwapped && (
+                                  {(!isAdmin && !isSuperAdmin) && !pendingReq && isSwapped && (
                                     <span className="text-[9px] font-bold text-orange-300 bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-400/40 inline-block mt-1 break-words leading-tight">
                                       🔄 Tukar dgn {getStaffName(swapMeta.original)} tgl {swapMeta.swappedDateNum || swapMeta.originalDateNum}
                                     </span>
@@ -733,7 +832,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         ) : (
           <div className="p-8 sm:p-12 text-center rounded-3xl bg-slate-900/60 border border-white/10 text-slate-400 space-y-3">
             <p className="text-xs sm:text-sm">Belum ada jadwal piket untuk bulan <strong className="text-white">{namaBulan[viewMonth - 1]} {viewYear}</strong>.</p>
-            {isAdmin && (
+            {(isAdmin || isSuperAdmin) && (
               <button
                 onClick={() => setGenModalOpen(true)}
                 className="px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer transition-all"
@@ -837,8 +936,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* SUB-MENU MODAL 2: LOG TUKAR PIKET (ADMIN) */}
-      {isAdmin && logsSubMenuOpen && (
+      {/* SUB-MENU MODAL 2: LOG TUKAR PIKET (ADMIN / SUPER ADMIN) */}
+      {(isAdmin || isSuperAdmin) && logsSubMenuOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-lg p-5 sm:p-7 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-2xl relative space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
             <button onClick={() => setLogsSubMenuOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
@@ -968,7 +1067,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
             <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
               <FontAwesomeIcon icon={faExchangeAlt} className="text-amber-400" />
-              <span>{isAdmin ? 'Kelola / Tukar Piket (Mode Admin)' : 'Ajukan Tukar Piket'}</span>
+              <span>{(isAdmin || isSuperAdmin) ? 'Kelola / Tukar Piket (Mode Admin)' : 'Ajukan Tukar Piket'}</span>
             </h3>
 
             <p className="text-xs text-slate-300">
@@ -1009,14 +1108,14 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
               <button
                 type="submit"
                 className={`w-full py-3 rounded-2xl font-bold text-xs shadow-3d-button transition-all cursor-pointer ${
-                  isAdmin ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'
+                  (isAdmin || isSuperAdmin) ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'
                 }`}
               >
-                {isAdmin ? 'Eksekusi Tukar Instan (Tanpa Tanda & Tanpa Menunggu)' : 'Kirim Pengajuan (Batas 8 Jam Konfirmasi)'}
+                {(isAdmin || isSuperAdmin) ? 'Eksekusi Tukar Instan (Tanpa Tanda & Tanpa Menunggu)' : 'Kirim Pengajuan (Batas 8 Jam Konfirmasi)'}
               </button>
 
-              {/* TOMBOL KHUSUS ADMIN: HAPUS PETUGAS SATUAN */}
-              {isAdmin && (
+              {/* TOMBOL KHUSUS ADMIN / SUPER ADMIN: HAPUS PETUGAS SATUAN */}
+              {(isAdmin || isSuperAdmin) && (
                 <button
                   type="button"
                   onClick={handleRemoveStaffFromDate}
@@ -1093,6 +1192,50 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
             >
               Batalkan Pengajuan Tukar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: TAMBAH PETUGAS PIKET (KHUSUS SUPER ADMIN) DENGAN LOGIKA KETAT */}
+      {isSuperAdmin && addModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
+          <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-emerald-500/40 shadow-3d-glass relative space-y-4">
+            <button onClick={() => setAddModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
+              <FontAwesomeIcon icon={faTimes} />
+            </button>
+            
+            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+              <FontAwesomeIcon icon={faUserCheck} className="text-emerald-400" />
+              <span>Tambah Petugas Piket</span>
+            </h3>
+            <p className="text-[11px] text-emerald-300 font-semibold bg-emerald-950/50 p-2 rounded-xl border border-emerald-500/30">
+              Tanggal Target: <strong>{new Date(selectedDateToAdd).getDate()} {namaBulan[viewMonth - 1]} {viewYear}</strong>
+            </p>
+
+            <form onSubmit={handleAddStaff} className="space-y-4 pt-1">
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1.5">Pilih Petugas untuk Ditambahkan</label>
+                <select
+                  value={selectedStaffToAdd}
+                  onChange={(e) => setSelectedStaffToAdd(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="">-- Pilih Petugas --</option>
+                  {staffList.map((s) => (
+                    <option key={s.id || s.key} value={s.id || s.key}>
+                      {s.name || s.NAMA || s.nama || s.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <button
+                type="submit"
+                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-3d-button transition-all cursor-pointer"
+              >
+                Simpan Penambahan
+              </button>
+            </form>
           </div>
         </div>
       )}
