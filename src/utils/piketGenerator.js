@@ -13,6 +13,7 @@
  * 5. Variasi Pasangan Petugas (Anti-Duplikasi Pasangan SUPER KETAT):
  *    - Jika SDM A & B pernah piket bersama, MAKA HARAM HUKUMNYA BERTEMU LAGI.
  *    - Pengacakan teman piket dijamin berbeda antara Shift 1 dan Shift 2 (A,B,C -> A,D,F).
+ *    - Jika semua kombinasi unik mentok, baru dikendurkan agar syarat 2 shift/SDM tetap terpenuhi.
  * 6. Garansi Kuota Harian & Anti Senin-Senin:
  *    - SENIN        : TERBANYAK / PRIORITAS (Wajib lebih besar dari hari lain, misal Senin 4, Sel-Kam 2/3).
  *    - SELASA-KAMIS : Kuota standar menyesuaikan sisa kuota (piketHarianQuota).
@@ -26,6 +27,18 @@
 const DUMMY_SAMPLE_NAMES = ['ahmad', 'budi', 'siti', 'dewi', 'eko', 'fajar', 'gita', 'hadi'];
 
 export function generateMonthlySchedule(year, month, staffList = [], config = {}, holidays = {}) {
+  // ===========================================================================
+  // FUNGSI PENGACAK MUTLAK (INJEKSI BARU UNTUK MENJAMIN VARIASI PASANGAN)
+  // ===========================================================================
+  const shuffleArray = (arr) => {
+    const newArr = [...arr];
+    for (let i = newArr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+    }
+    return newArr;
+  };
+
   const now = new Date();
   let targetYear = Number(year);
   let targetMonth = Number(month);
@@ -55,8 +68,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const dayOfWeek = dateObj.getDay();
 
     if (dayOfWeek !== 0 && dayOfWeek !== 6) { 
-      const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const formattedLabel = `${d} ${namaBulan[targetMonth - 1]} ${targetYear}`;
+      const dateStr = `\({targetYear}-\){String(targetMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const formattedLabel = `\({d}\){namaBulan[targetMonth - 1]} ${targetYear}`;
       const dayName = namaHari[dayOfWeek];
 
       if (dayOfWeek === 1 && workDays.length > 0) {
@@ -189,9 +202,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   };
 
   const staffState = {};
-  const randomizedStaffList = [...cleanStaffList].sort(() => Math.random() - 0.5);
-
-  randomizedStaffList.forEach((s) => {
+  
+  cleanStaffList.forEach((s) => {
     staffState[s.id] = {
       id: s.id,
       name: s.name,
@@ -209,8 +221,11 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const quota = dailyQuotas[dayIdx];
 
     for (let q = 0; q < quota; q++) {
+      // ACAK ULANG KANDIDAT SETIAP KALI MENCARI PETUGAS AGAR PASANGAN SANGAT ACAK
+      let currentStaffShuffled = shuffleArray(cleanStaffList);
+
       // Attempt A: Ketat 14 Hari + Anti Duplikasi Pasangan
-      let candidates = randomizedStaffList
+      let candidates = currentStaffShuffled
         .map((s) => staffState[s.id])
         .filter((st) => {
           if (st.count >= targetPerStaff) return false;
@@ -224,9 +239,9 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           return true;
         });
 
-      // Attempt A2 (INJEKSI BARU): Turunkan interval ke 10 hari, TAPI TETAP ANTI DUPLIKASI PASANGAN
+      // Attempt A2: Turunkan interval ke 10 hari, TAPI TETAP ANTI DUPLIKASI PASANGAN
       if (candidates.length === 0) {
-        candidates = randomizedStaffList
+        candidates = currentStaffShuffled
           .map((s) => staffState[s.id])
           .filter((st) => {
             if (st.count >= targetPerStaff) return false;
@@ -245,9 +260,9 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           });
       }
 
-      // Attempt B: Kendurkan batas variasi pasangan
+      // Attempt B: Kendurkan batas variasi pasangan (JIKA MENTOK, BARU BOLEH PASANGAN SAMA DEMI BAGI RATA)
       if (candidates.length === 0) {
-        candidates = randomizedStaffList
+        candidates = currentStaffShuffled
           .map((s) => staffState[s.id])
           .filter((st) => {
             if (st.count >= targetPerStaff) return false;
@@ -261,7 +276,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
 
       // Attempt C: Kendurkan jarak interval ekstrim
       if (candidates.length === 0) {
-        candidates = randomizedStaffList
+        candidates = currentStaffShuffled
           .map((s) => staffState[s.id])
           .filter((st) => {
             if (st.count >= targetPerStaff) return false;
@@ -283,7 +298,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
         const distA = a.assignedDays.length > 0 ? Math.abs(day.dayNumber - validDays[a.assignedDays[0]].dayNumber) : 999;
         const distB = b.assignedDays.length > 0 ? Math.abs(day.dayNumber - validDays[b.assignedDays[0]].dayNumber) : 999;
         if (distA !== distB) return distB - distA;
-        return Math.random() - 0.5;
+        // Karena array kandidat sudah dishuffle mutlak di atas, return 0 sudah cukup untuk menjaga keacakannya
+        return 0; 
       });
 
       const chosen = candidates[0];
@@ -303,7 +319,10 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   // ---------------------------------------------------------------------------
   // 4. PASS 2: PEMENUHAN BEBAN SDM (GARANSI SAPU BERSIH 100% KEBAGIAN 2 KALI)
   // ---------------------------------------------------------------------------
-  randomizedStaffList.forEach((s) => {
+  // Acak list staff sebelum pemenuhan sisa agar distribusinya lebih natural
+  const shuffledStaffForPass2 = shuffleArray(cleanStaffList);
+  
+  shuffledStaffForPass2.forEach((s) => {
     const st = staffState[s.id];
 
     while (st.count < targetPerStaff) {
@@ -322,7 +341,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           return true;
         });
 
-      // Prioritas 1.5 (INJEKSI BARU): 10 Hari & TETAP Anti Duplikasi Pasangan
+      // Prioritas 1.5: 10 Hari & TETAP Anti Duplikasi Pasangan
       if (eligibleDays.length === 0) {
         eligibleDays = validDays
           .map((d, idx) => ({ day: d, idx }))
@@ -343,7 +362,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           });
       }
 
-      // Prioritas 2: Kendurkan variasi pasangan
+      // Prioritas 2: Kendurkan variasi pasangan (BOLEH SAMA DEMI GENAP 2 KALI)
       if (eligibleDays.length === 0) {
         eligibleDays = validDays
           .map((d, idx) => ({ day: d, idx }))
@@ -369,7 +388,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
           });
       }
 
-      // Prioritas 4: MUTLAK FORCE ASSIGN
+      // Prioritas 4: MUTLAK FORCE ASSIGN (Garansi 100% masuk agar semua rata)
       if (eligibleDays.length === 0) {
         eligibleDays = validDays
           .map((d, idx) => ({ day: d, idx }))
@@ -381,17 +400,19 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
       }
 
       if (eligibleDays.length > 0) {
-        eligibleDays.sort((a, b) => {
+        // Acak hari yang didapat agar penempatan sisa jadwal juga tersebar acak
+        let shuffledEligibleDays = shuffleArray(eligibleDays);
+        shuffledEligibleDays.sort((a, b) => {
           if (a.day.assigned.length !== b.day.assigned.length) {
             return a.day.assigned.length - b.day.assigned.length;
           }
           const distA = st.assignedDays.length > 0 ? Math.abs(a.day.dayNumber - validDays[st.assignedDays[0]].dayNumber) : 0;
           const distB = st.assignedDays.length > 0 ? Math.abs(b.day.dayNumber - validDays[st.assignedDays[0]].dayNumber) : 0;
           if (distA !== distB) return distB - distA;
-          return Math.random() - 0.5;
+          return 0; // Menjaga hasil acakan di atas tetap stabil
         });
 
-        const targetDay = eligibleDays[0];
+        const targetDay = shuffledEligibleDays[0];
 
         targetDay.day.assigned.forEach((existingId) => {
           markPair(st.id, existingId);
@@ -415,7 +436,8 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
     const maxAllowed = dailyQuotas[dayIdx] + 1;
 
     while (day.assigned.length > maxAllowed) {
-      const candidateDays = validDays.filter(d => 
+      // Acak urutan hari di Rebalancing agar perputaran pemerataan lebih variatif
+      const candidateDays = shuffleArray(validDays).filter(d => 
         d.dateStr !== day.dateStr && 
         d.dayOfWeek !== 5 && 
         (d.assigned.length < dailyQuotas[validDays.indexOf(d)])
@@ -430,14 +452,13 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
       let moved = false;
       for (const targetD of candidateDays) {
         
-        // INJEKSI BARU: Saat mindah orang, pastikan dia tidak ketemu mantan teman piket di hari yang baru
         let staffIdx = day.assigned.findIndex(id => {
           const st = staffState[id];
           const hasRepeat = targetD.assigned.some(existingId => arePairedBefore(id, existingId));
           return !targetD.assigned.includes(id) && !st.assignedDaysOfWeek.includes(targetD.dayOfWeek) && !hasRepeat;
         });
 
-        // Fallback: Jika saking padatnya tidak ada yang lolos Anti-Duplikasi, gunakan logika awal
+        // Fallback: Jika mentok, kendurkan duplikasi demi meratakan kuota hari
         if (staffIdx === -1) {
           staffIdx = day.assigned.findIndex(id => {
             const st = staffState[id];
@@ -448,7 +469,6 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
         if (staffIdx !== -1) {
           const movedId = day.assigned.splice(staffIdx, 1)[0];
           
-          // CATAT PASANGAN BARU KARENA ORANG INI PINDAH HARI
           targetD.assigned.forEach((existingId) => markPair(movedId, existingId));
           targetD.assigned.push(movedId);
           
@@ -476,11 +496,15 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
       const secondMondayIdx = mondaySlots[1];
       const secondMondayDay = validDays[secondMondayIdx];
       
-      for (let i = 0; i < validDays.length; i++) {
-        const targetDay = validDays[i];
-        if (targetDay.dayOfWeek >= 2 && targetDay.dayOfWeek <= 4 && !st.assignedDays.includes(i)) {
+      // Acak hari target tukar posisi agar tidak selalu jatuh di urutan awal hari Selasa
+      const shuffledSwapDays = shuffleArray(validDays.map((d, idx) => ({ day: d, idx })));
+
+      for (let i = 0; i < shuffledSwapDays.length; i++) {
+        const targetDay = shuffledSwapDays[i].day;
+        const targetIdx = shuffledSwapDays[i].idx;
+        
+        if (targetDay.dayOfWeek >= 2 && targetDay.dayOfWeek <= 4 && !st.assignedDays.includes(targetIdx)) {
           
-          // INJEKSI BARU: Saat nge-SWAP, periksa silang Anti-Duplikasi Pasangan untuk KEDUA petugas
           let swapCandidateId = targetDay.assigned.find(candidateId => {
             const candSt = staffState[candidateId];
             const stHasRepeat = targetDay.assigned.some(existingId => existingId !== candidateId && arePairedBefore(st.id, existingId));
@@ -489,7 +513,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             return candSt && !candSt.mondayAssigned && !secondMondayDay.assigned.includes(candidateId) && !stHasRepeat && !candHasRepeat;
           });
 
-          // Fallback logika asli swap jika swap ketat gagal
+          // Fallback logika asli swap jika kombinasi unik mentok
           if (!swapCandidateId) {
             swapCandidateId = targetDay.assigned.find(candidateId => {
               const candSt = staffState[candidateId];
@@ -501,19 +525,19 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
             const candSt = staffState[swapCandidateId];
 
             secondMondayDay.assigned = secondMondayDay.assigned.filter(id => id !== st.id);
-            secondMondayDay.assigned.forEach(existingId => markPair(swapCandidateId, existingId)); // Catat Pasangan Swap Baru
+            secondMondayDay.assigned.forEach(existingId => markPair(swapCandidateId, existingId)); 
             secondMondayDay.assigned.push(swapCandidateId);
 
             targetDay.assigned = targetDay.assigned.filter(id => id !== swapCandidateId);
-            targetDay.assigned.forEach(existingId => markPair(st.id, existingId)); // Catat Pasangan Swap Baru
+            targetDay.assigned.forEach(existingId => markPair(st.id, existingId)); 
             targetDay.assigned.push(st.id);
 
             st.assignedDays = st.assignedDays.filter(idx => idx !== secondMondayIdx);
-            st.assignedDays.push(i);
+            st.assignedDays.push(targetIdx); // Pindah ke Index hasil acakan
             st.assignedDaysOfWeek = st.assignedDays.map(idx => validDays[idx].dayOfWeek);
             st.mondayAssigned = st.assignedDaysOfWeek.includes(1);
 
-            candSt.assignedDays = candSt.assignedDays.filter(idx => idx !== i);
+            candSt.assignedDays = candSt.assignedDays.filter(idx => idx !== targetIdx);
             candSt.assignedDays.push(secondMondayIdx);
             candSt.assignedDaysOfWeek = candSt.assignedDays.map(idx => validDays[idx].dayOfWeek);
             candSt.mondayAssigned = true;
@@ -544,7 +568,7 @@ export function generateMonthlySchedule(year, month, staffList = [], config = {}
   });
 
   // ---------------------------------------------------------------------------
-  // 8. METADATA VALIDASI SUPER ADMIN (Menghitung Siapa Kurang / Lebih Piket)
+  // 8. METADATA VALIDASI SUPER ADMIN
   // ---------------------------------------------------------------------------
   const validationSummary = {};
   Object.values(staffState).forEach((st) => {
