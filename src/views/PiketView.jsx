@@ -450,8 +450,14 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       return showToast('Petugas tersebut sudah piket di tanggal ini!', 'error');
     }
 
+    // --- PERBAIKAN BUG DIMULAI DARI SINI ---
     // HITUNG FREKUENSI UNTUK ATURAN KETAT
-    const workingDays = Object.values(currentSchedule).filter(d => d && typeof d === 'object' && !d.isHoliday && d.dateStr);
+    // BUG FIX: Menggunakan Object.entries agar dateStr pasti didapat dari "key" kalender.
+    // Ini memperbaiki masalah dimana array workingDays menjadi kosong dan menyebabkan Batas = 0.
+    const workingDays = Object.entries(currentSchedule)
+      .filter(([key, val]) => key !== 'isLocked' && val && typeof val === 'object' && !val.isHoliday)
+      .map(([key, val]) => ({ dateStr: key, ...val }));
+    
     let staffCounts = {};
     
     workingDays.forEach(day => {
@@ -462,10 +468,13 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     });
 
     const activeStaffCount = staffList.length || 1;
-    // SMART CALCULATION FIX: Gunakan standar target dari config untuk memastikan jatah tidak menyusut saat ada yang dihapus.
-    const staffPerDay = config.staffPerDay ? parseInt(config.staffPerDay, 10) : 2;
+    // SMART CALCULATION FIX: 
+    const staffPerDay = config?.staffPerDay ? parseInt(config.staffPerDay, 10) : 2;
     const expectedTotalSlots = workingDays.length * staffPerDay;
-    const avgPerPerson = Math.ceil(expectedTotalSlots / activeStaffCount);
+    
+    // BUG FIX: Tambahkan fallback "|| 2" (atau sesuai staffPerDay) 
+    // agar pembagian mutlak tidak pernah bernilai 0
+    const avgPerPerson = Math.ceil(expectedTotalSlots / activeStaffCount) || staffPerDay; 
     
     const currentCount = staffCounts[selectedStaffToAdd] || 0;
 
@@ -474,6 +483,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       showToast(`TIDAK BISA DISIMPAN! Jatah piket ${getStaffName(selectedStaffToAdd)} sudah penuh (Batas: ${avgPerPerson} kali bulan ini). Semua harus terbagi rata!`, 'error');
       return; // Berhenti eksekusi, blokir penyimpanan
     }
+    // --- PERBAIKAN BUG SELESAI ---
 
     // VALIDASI KETAT 2 (SOFT BLOCK): CEK JARAK TERDEKAT (Pemberitahuan jika <= 2 hari)
     let isTooClose = false;
@@ -509,7 +519,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       showToast('Gagal menambahkan petugas ke database', 'error');
     }
   };
-
   // ---------------------------------------------------------------------------
   // 7. STRUKTURISASI MINGGU & RANGKUMAN FILTER SDM
   // ---------------------------------------------------------------------------
