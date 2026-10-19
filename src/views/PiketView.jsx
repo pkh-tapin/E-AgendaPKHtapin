@@ -27,8 +27,10 @@ import {
   faTimesCircle,
   faMoneyBillWave, 
   faCommentDots,
-  faSignInAlt,    // TAMBAHAN ICON DATANG
-  faSignOutAlt    // TAMBAHAN ICON PULANG
+  faSignInAlt,    
+  faSignOutAlt,
+  faEyeSlash,     // TAMBAHAN UNTUK SEMBUNYIKAN NAMA
+  faUndo          // TAMBAHAN UNTUK KEMBALIKAN NAMA
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
@@ -490,6 +492,12 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const [absenSubMenuOpen, setAbsenSubMenuOpen] = useState(false);
   const [attendanceData, setAttendanceData] = useState({});
   const [absenSelectedDate, setAbsenSelectedDate] = useState(todayStr);
+  
+  // State Baru untuk Filter Evaluasi Tahunan & CRUD Hidden Staf (Admin)
+  const [rekapMode, setRekapMode] = useState('Bulanan'); // 'Bulanan' | 'Tahunan'
+  const [rekapYearFilter, setRekapYearFilter] = useState(now.getFullYear());
+  const [allAttendanceData, setAllAttendanceData] = useState({});
+  const [hiddenStaff, setHiddenStaff] = useState([]);
 
   // Modal Form Khusus Absen per Orang (Hadir, Izin, Alpa + Keterangan & Jam Datang/Pulang)
   const [showAbsenFormModal, setShowAbsenFormModal] = useState(false);
@@ -498,6 +506,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     waktuDatang: '', waktuPulang: '', jamKerja: 0 
   });
 
+  // Fetch Attendance Bulanan
   useEffect(() => {
     const attRef = ref(db, `attendance/${currentMonthKey}`);
     const unsubscribe = onValue(attRef, (snapshot) => {
@@ -505,6 +514,41 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     });
     return () => unsubscribe();
   }, [currentMonthKey]);
+
+  // Fetch Hidden Staff & All Attendance Tahunan (Khusus Admin)
+  useEffect(() => {
+    if (isAdmin) {
+      const hsRef = ref(db, 'config/hiddenStaffRekap');
+      const unsubHs = onValue(hsRef, snap => setHiddenStaff(snap.val() || []));
+      return () => unsubHs();
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin && absenSubMenuOpen && rekapMode === 'Tahunan') {
+       const attRef = ref(db, 'attendance');
+       const unsubAtt = onValue(attRef, snap => setAllAttendanceData(snap.val() || {}));
+       return () => unsubAtt();
+    }
+  }, [isAdmin, absenSubMenuOpen, rekapMode]);
+
+  // Handler Sembunyikan Staf (CRUD)
+  const handleHideStaff = async (staffId) => {
+    if (!isAdmin) return;
+    if (window.confirm(`Sembunyikan ${getStaffName(staffId)} dari Tabel Rekap?`)) {
+       const newHidden = [...hiddenStaff, staffId];
+       await set(ref(db, 'config/hiddenStaffRekap'), newHidden);
+       showToast('Staf berhasil disembunyikan dari rekap.', 'success');
+    }
+  };
+
+  // Handler Kembalikan Staf (CRUD)
+  const handleRestoreStaff = async (staffId) => {
+    if (!isAdmin) return;
+    const newHidden = hiddenStaff.filter(id => id !== staffId);
+    await set(ref(db, 'config/hiddenStaffRekap'), newHidden);
+    showToast('Staf dikembalikan ke dalam rekap.', 'success');
+  };
 
   const isDateAllowed = (targetDateStr) => {
     if (isAdmin) return true;
@@ -517,11 +561,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     const [sh, sm] = start.split(':').map(Number);
     const [eh, em] = end.split(':').map(Number);
     let diff = (eh + em/60) - (sh + sm/60);
-    if (diff < 0) diff += 24; // Mencegah hasil minus jika melintasi tengah malam
+    if (diff < 0) diff += 24; 
     return parseFloat(diff.toFixed(2));
   };
 
-  // HANDLER SET WAKTU SAAT INI (TOMBOL ABSEN DATANG/PULANG)
   const handleAutoTime = (field) => {
     const nowLocal = new Date();
     const hhmm = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}`;
@@ -534,7 +577,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     });
   };
 
-  // HANDLER JIKA ADMIN KETIK/EDIT WAKTU MANUAL DI INPUT
   const handleTimeChange = (field, val) => {
     setAbsenFormData(prev => {
       const newData = { ...prev, [field]: val };
@@ -545,7 +587,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     });
   };
 
-  // Buka Modal Absen
   const handleOpenAbsenModal = (dateStr, staffId, defaultStatus = 'Hadir') => {
     if (isPublic) return showToast('Mode Publik tidak bisa mengisi absen.', 'error');
     if (!isDateAllowed(dateStr)) {
@@ -564,7 +605,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     setShowAbsenFormModal(true);
   };
 
-  // Simpan Absen via Modal
   const handleSubmitAbsen = async (e) => {
     e.preventDefault();
     if (isPublic) return;
@@ -586,7 +626,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     }
   };
 
-  // Hapus Absen Khusus Admin (CRUD LENGKAP)
   const handleDeleteAbsen = async () => {
     if (!isAdmin) return;
     if (window.confirm(`Yakin ingin menghapus seluruh data absen ${getStaffName(absenFormData.staffId)} di tanggal ini?`)) {
@@ -600,7 +639,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     }
   };
 
-  // Memoized: Hitungan & Riwayat Absen Dibuat Jadi Array untuk Kebutuhan Tabel
+  // Memoized: Hitungan & Riwayat Absen Dibuat Jadi Array untuk Kebutuhan Tabel (BULANAN)
   const absenStatsArray = useMemo(() => {
     const statsMap = {};
     staffList.forEach(s => {
@@ -608,14 +647,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       statsMap[sId] = {
         id: sId,
         name: s.name || s.NAMA || s.nama || s.id,
-        totalJatah: 0,
-        totalHadir: 0,
-        totalIzin: 0,
-        totalAlpa: 0,
-        totalKurangJam: 0,
-        dendaJam: 0,
-        dendaAlpa: 0,
-        totalDenda: 0
+        totalJatah: 0, totalHadir: 0, totalIzin: 0, totalAlpa: 0,
+        totalKurangJam: 0, dendaJam: 0, dendaAlpa: 0, totalDenda: 0
       };
     });
 
@@ -641,20 +674,83 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
              statsMap[staffId].totalAlpa += 1;
              statsMap[staffId].dendaAlpa += 50000;
           } else {
-             // Izin/Sakit/Lainnya
              statsMap[staffId].totalIzin += 1;
           }
         }
       });
     });
 
-    // Kalkulasi Total Denda Keseluruhan per Orang
-    return Object.values(statsMap).map(stat => ({
-      ...stat,
-      totalDenda: stat.dendaJam + stat.dendaAlpa
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    // Kalkulasi Total Denda Keseluruhan per Orang & Filter Hidden Staff
+    return Object.values(statsMap)
+      .filter(stat => !hiddenStaff.includes(stat.id))
+      .map(stat => ({
+        ...stat,
+        totalDenda: stat.dendaJam + stat.dendaAlpa
+      })).sort((a, b) => a.name.localeCompare(b.name));
 
-  }, [currentSchedule, attendanceData, staffList]);
+  }, [currentSchedule, attendanceData, staffList, hiddenStaff]);
+
+  // Memoized Baru: Hitungan & Riwayat TAHUNAN (Admin Only)
+  const yearlyStatsArray = useMemo(() => {
+    if (rekapMode !== 'Tahunan') return [];
+    
+    const statsMap = {};
+    staffList.forEach(s => {
+      const sId = s.id || s.key;
+      statsMap[sId] = {
+        id: sId,
+        name: s.name || s.NAMA || s.nama || s.id,
+        totalJatah: 0, totalHadir: 0, totalIzin: 0, totalAlpa: 0,
+        totalKurangJam: 0, dendaJam: 0, dendaAlpa: 0, totalDenda: 0
+      };
+    });
+
+    const yearStr = String(rekapYearFilter);
+
+    // Iterasi seluruh jadwal bulan yang ada di prop `schedules` untuk tahun terpilih
+    Object.entries(schedules).forEach(([monthKey, monthData]) => {
+       if (monthKey.startsWith(yearStr)) {
+          Object.entries(monthData).forEach(([dateStr, dayData]) => {
+             if (dateStr === 'isLocked' || !dayData.assigned) return;
+             const dayAtt = allAttendanceData[monthKey]?.[dateStr] || {};
+             
+             dayData.assigned.forEach(staffId => {
+                if (!statsMap[staffId]) return;
+                statsMap[staffId].totalJatah += 1;
+                
+                const attRecord = dayAtt[staffId];
+                if (attRecord) {
+                   if (attRecord.status === 'Hadir') {
+                      statsMap[staffId].totalHadir += 1;
+                      const jk = Number(attRecord.jamKerja) || 0;
+                      if (jk < 4) {
+                        const kurang = 4 - jk;
+                        statsMap[staffId].totalKurangJam += kurang;
+                        statsMap[staffId].dendaJam += (kurang * 10000);
+                      }
+                   } else if (attRecord.status === 'Alpa') {
+                      statsMap[staffId].totalAlpa += 1;
+                      statsMap[staffId].dendaAlpa += 50000;
+                   } else {
+                      statsMap[staffId].totalIzin += 1;
+                   }
+                }
+             });
+          });
+       }
+    });
+
+    return Object.values(statsMap)
+      .filter(stat => !hiddenStaff.includes(stat.id))
+      .map(stat => ({
+        ...stat,
+        totalDenda: stat.dendaJam + stat.dendaAlpa
+      })).sort((a, b) => a.name.localeCompare(b.name));
+
+  }, [rekapMode, rekapYearFilter, schedules, allAttendanceData, staffList, hiddenStaff]);
+
+  // Helper untuk mendapatkan array tabel aktif
+  const displayedStatsArray = rekapMode === 'Tahunan' ? yearlyStatsArray : absenStatsArray;
 
   // ---------------------------------------------------------------------------
   // 7. STRUKTURISASI MINGGU & RANGKUMAN FILTER SDM
@@ -1155,7 +1251,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                       onChange={(e) => setAbsenFormData({...absenFormData, jamKerja: e.target.value})}
                       className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none focus:border-teal-400 cursor-not-allowed"
                       placeholder="Terhitung otomatis..."
-                      readOnly={!isAdmin} // Hanya admin yang boleh over-ride manual
+                      readOnly={!isAdmin} 
                       required
                     />
                     <p className="text-[10px] text-slate-500 mt-1">Standar Piket: 4 Jam. Kurang jam akan diakumulasi ke dalam denda.</p>
@@ -1336,10 +1432,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* --- MODAL 7: REKAPITULASI TABEL ABSENSI KESELURUHAN (LAMA) --- */}
+      {/* --- MODAL 7: REKAPITULASI TABEL ABSENSI KESELURUHAN (DENGAN TAHUNAN & CRUD ADMIN) --- */}
       {absenSubMenuOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-4xl p-5 sm:p-7 rounded-3xl bg-slate-900 border border-teal-500/40 shadow-2xl relative space-y-5 animate-fadeIn flex flex-col max-h-[90vh]">
+          <div className="w-full max-w-5xl p-5 sm:p-7 rounded-3xl bg-slate-900 border border-teal-500/40 shadow-2xl relative space-y-4 animate-fadeIn flex flex-col max-h-[95vh]">
             <button 
               onClick={() => setAbsenSubMenuOpen(false)} 
               className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"
@@ -1347,50 +1443,90 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
               <FontAwesomeIcon icon={faTimes} />
             </button>
 
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2.5 border-b border-white/10 pb-3 shrink-0">
+            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2.5 shrink-0">
               <FontAwesomeIcon icon={faClipboardCheck} className="text-teal-400" />
-              <span>Tabel Rekapitulasi Piket & Absensi ({namaBulan[viewMonth - 1]} {viewYear})</span>
+              <span>
+                 {rekapMode === 'Tahunan' 
+                   ? `Evaluasi Tahunan Piket & Absensi (${rekapYearFilter})` 
+                   : `Tabel Rekapitulasi Piket & Absensi (${namaBulan[viewMonth - 1]} ${viewYear})`}
+              </span>
             </h3>
 
-            {/* KOMPONEN INPUT CEPAT HARIAN DI ATAS TABEL */}
+            {/* TAB SWITCH BULANAN / TAHUNAN (KHUSUS ADMIN) */}
+            {isAdmin && (
+              <div className="flex gap-2 bg-slate-950 p-1.5 rounded-xl w-fit border border-white/5 shrink-0">
+                 <button 
+                   onClick={() => setRekapMode('Bulanan')} 
+                   className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${rekapMode === 'Bulanan' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-900'}`}
+                 >
+                   Rekap Bulanan
+                 </button>
+                 <button 
+                   onClick={() => setRekapMode('Tahunan')} 
+                   className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${rekapMode === 'Tahunan' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-900'}`}
+                 >
+                   Evaluasi Tahunan
+                 </button>
+              </div>
+            )}
+
+            {/* KOMPONEN FILTER & INPUT CEPAT */}
             <div className="p-3 bg-slate-950/80 border border-teal-500/20 rounded-xl flex items-center gap-3 shrink-0 flex-wrap">
-               <label className="text-[11px] text-slate-300 font-bold w-full sm:w-auto">Isi Cepat Absen Tanggal:</label>
-               <select
-                  value={absenSelectedDate}
-                  onChange={(e) => setAbsenSelectedDate(e.target.value)}
-                  className="px-3 py-2 rounded-lg bg-slate-900 border border-white/10 text-white text-xs outline-none focus:border-teal-400 flex-1 min-w-[200px]"
-                >
-                  <option value="">-- Pilih Tanggal Tugas --</option>
-                  {Object.entries(currentSchedule)
-                    .filter(([key, val]) => key !== 'isLocked' && !val.isHoliday)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([dStr, dData]) => (
-                      <option key={dStr} value={dStr}>
-                        {dData.dayName}, {dData.dayNumber} {namaBulan[viewMonth - 1]}
-                      </option>
-                    ))}
-                </select>
-                <div className="flex gap-1.5 w-full sm:w-auto overflow-x-auto">
-                    {absenSelectedDate && Array.isArray(currentSchedule[absenSelectedDate]?.assigned) ? (
-                        currentSchedule[absenSelectedDate].assigned.map(staffId => (
-                           <button
-                             key={staffId}
-                             onClick={() => handleOpenAbsenModal(absenSelectedDate, staffId)}
-                             className="px-3 py-2 text-[10px] font-bold rounded-lg bg-teal-600/30 border border-teal-500/50 hover:bg-teal-500 text-teal-200 hover:text-white transition-all whitespace-nowrap cursor-pointer"
-                           >
-                             Absen {getStaffName(staffId).split(' ')[0]}
-                           </button>
-                        ))
-                    ) : (
-                        <span className="text-[10px] text-slate-500 italic py-2">Pilih Tgl / Tidak ada jadwal.</span>
-                    )}
-                </div>
+               {rekapMode === 'Bulanan' ? (
+                 <>
+                   <label className="text-[11px] text-slate-300 font-bold w-full sm:w-auto">Isi Cepat Absen Tanggal:</label>
+                   <select
+                      value={absenSelectedDate}
+                      onChange={(e) => setAbsenSelectedDate(e.target.value)}
+                      className="px-3 py-2 rounded-lg bg-slate-900 border border-white/10 text-white text-xs outline-none focus:border-teal-400 flex-1 min-w-[200px] cursor-pointer"
+                    >
+                      <option value="">-- Pilih Tanggal Tugas --</option>
+                      {Object.entries(currentSchedule)
+                        .filter(([key, val]) => key !== 'isLocked' && !val.isHoliday)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([dStr, dData]) => (
+                          <option key={dStr} value={dStr}>
+                            {dData.dayName}, {dData.dayNumber} {namaBulan[viewMonth - 1]}
+                          </option>
+                        ))}
+                    </select>
+                    <div className="flex gap-1.5 w-full sm:w-auto overflow-x-auto">
+                        {absenSelectedDate && Array.isArray(currentSchedule[absenSelectedDate]?.assigned) ? (
+                            currentSchedule[absenSelectedDate].assigned.map(staffId => (
+                               <button
+                                 key={staffId}
+                                 onClick={() => handleOpenAbsenModal(absenSelectedDate, staffId)}
+                                 className="px-3 py-2 text-[10px] font-bold rounded-lg bg-teal-600/30 border border-teal-500/50 hover:bg-teal-500 text-teal-200 hover:text-white transition-all whitespace-nowrap cursor-pointer"
+                               >
+                                 Absen {getStaffName(staffId).split(' ')[0]}
+                               </button>
+                            ))
+                        ) : (
+                            <span className="text-[10px] text-slate-500 italic py-2">Pilih Tgl / Tidak ada jadwal.</span>
+                        )}
+                    </div>
+                 </>
+               ) : (
+                 <div className="flex items-center gap-3 w-full">
+                    <label className="text-[11px] text-indigo-300 font-bold">Pilih Tahun Evaluasi:</label>
+                    <select
+                      value={rekapYearFilter}
+                      onChange={(e) => setRekapYearFilter(Number(e.target.value))}
+                      className="px-4 py-2 rounded-lg bg-slate-900 border border-indigo-500/50 text-white text-xs font-bold outline-none focus:border-indigo-400 cursor-pointer"
+                    >
+                      {[2025, 2026, 2027, 2028, 2029, 2030].map(yr => (
+                        <option key={yr} value={yr}>Tahun {yr}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-400 italic">Data tahunan mencakup seluruh rekapitulasi hitungan denda dan absen selama 1 tahun penuh.</p>
+                 </div>
+               )}
             </div>
 
             {/* TABEL KESELURUHAN */}
             <div className="flex-1 overflow-auto rounded-xl border border-white/10 bg-slate-950 custom-scrollbar">
               <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
-                <thead className="bg-slate-900 sticky top-0 z-10">
+                <thead className="bg-slate-900 sticky top-0 z-10 shadow-md">
                   <tr>
                     <th className="p-3 border-b border-white/10 font-black text-slate-300">Nama Petugas SDM</th>
                     <th className="p-3 border-b border-white/10 font-bold text-center text-slate-400">Jatah Piket</th>
@@ -1403,13 +1539,14 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                         <th className="p-3 border-b border-white/10 font-bold text-right text-orange-400">Denda Jam</th>
                         <th className="p-3 border-b border-white/10 font-bold text-right text-rose-500">Denda Alpa</th>
                         <th className="p-3 border-b border-white/10 font-black text-right text-white">Total Denda</th>
+                        <th className="p-3 border-b border-white/10 font-bold text-center text-slate-500 border-l border-white/5">Aksi</th>
                       </>
                     )}
                   </tr>
                 </thead>
                 <tbody>
-                  {absenStatsArray.length > 0 ? (
-                    absenStatsArray.map((stat, idx) => (
+                  {displayedStatsArray.length > 0 ? (
+                    displayedStatsArray.map((stat, idx) => (
                       <tr key={stat.id} className={`border-b border-white/5 hover:bg-white/5 transition-colors ${idx % 2 === 0 ? 'bg-transparent' : 'bg-slate-900/30'}`}>
                         <td className="p-3 font-bold text-white max-w-[150px] truncate" title={stat.name}>{stat.name}</td>
                         <td className="p-3 text-center text-slate-300 font-black bg-slate-800/30">{stat.totalJatah}</td>
@@ -1430,26 +1567,57 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                             <td className="p-3 text-right text-white font-black font-mono tracking-tighter bg-rose-950/20">
                               {stat.totalDenda > 0 ? `Rp ${(stat.totalDenda).toLocaleString('id-ID')}` : '-'}
                             </td>
+                            <td className="p-3 text-center border-l border-white/5">
+                               <button 
+                                 onClick={() => handleHideStaff(stat.id)}
+                                 className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600/80 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                                 title="Sembunyikan Staf dari Rekap"
+                               >
+                                  <FontAwesomeIcon icon={faEyeSlash} />
+                               </button>
+                            </td>
                           </>
                         )}
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={isAdmin ? 9 : 5} className="p-8 text-center text-slate-500 italic">Data petugas tidak ditemukan atau kosong.</td>
+                      <td colSpan={isAdmin ? 10 : 5} className="p-8 text-center text-slate-500 italic">Data petugas tidak ditemukan atau kosong.</td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
 
+            {/* DAFTAR NAMA YANG DISEMBUNYIKAN & KETENTUAN DENDA */}
             {isAdmin && (
-               <div className="shrink-0 p-3 bg-rose-950/30 border border-rose-500/20 rounded-xl text-[10px] text-rose-200">
-                  <strong className="text-rose-400"><FontAwesomeIcon icon={faMoneyBillWave}/> Ketentuan Denda (Hanya Tampil di Admin):</strong> 
-                  <ul className="list-disc pl-4 mt-1">
-                    <li>Standar piket adalah 4 Jam. Kekurangan jam piket didenda <strong>Rp 10.000 / Jam</strong>.</li>
-                    <li>Tanpa keterangan / Alpa didenda tetap <strong>Rp 50.000 / Hari</strong>.</li>
-                  </ul>
+               <div className="shrink-0 space-y-2">
+                  {hiddenStaff.length > 0 && (
+                     <div className="p-3 bg-slate-900 border border-white/10 rounded-xl">
+                       <h4 className="text-[10px] text-slate-400 font-bold mb-2">Petugas yang Disembunyikan (Klik untuk memulihkan):</h4>
+                       <div className="flex flex-wrap gap-2">
+                         {hiddenStaff.map(id => (
+                           <button 
+                             key={id} 
+                             onClick={() => handleRestoreStaff(id)} 
+                             className="px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 border border-white/10 text-slate-300 hover:text-white text-[10px] font-bold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                             title="Kembalikan nama ini ke dalam tabel rekap"
+                           >
+                             <FontAwesomeIcon icon={faUndo} className="text-teal-400" />
+                             {getStaffName(id)}
+                           </button>
+                         ))}
+                       </div>
+                     </div>
+                  )}
+
+                  <div className="p-3 bg-rose-950/30 border border-rose-500/20 rounded-xl text-[10px] text-rose-200">
+                     <strong className="text-rose-400"><FontAwesomeIcon icon={faMoneyBillWave}/> Ketentuan Denda (Hanya Tampil di Admin):</strong> 
+                     <ul className="list-disc pl-4 mt-1">
+                       <li>Standar piket adalah 4 Jam. Kekurangan jam piket didenda <strong>Rp 10.000 / Jam</strong>.</li>
+                       <li>Tanpa keterangan / Alpa didenda tetap <strong>Rp 50.000 / Hari</strong>.</li>
+                     </ul>
+                  </div>
                </div>
             )}
           </div>
