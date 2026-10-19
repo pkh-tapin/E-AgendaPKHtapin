@@ -41,6 +41,20 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const isPublic = !isAdmin && !isSdm;
 
   // ---------------------------------------------------------------------------
+  // 0. SANITASI DATA OTOMATIS (MENGHAPUS GHOST / NAMA DUMMY HURUF KECIL)
+  // ---------------------------------------------------------------------------
+  // Membuang nama yang mengandung huruf kecil atau dummy data sisa dari database.
+  // Data riil sistem ini terdeteksi selalu menggunakan UPPERCASE/KAPITAL.
+  const activeStaffList = useMemo(() => {
+    return staffList.filter(s => {
+      const n = String(s.name || s.NAMA || s.nama || '').trim();
+      if (!n) return false;
+      // Filter mutlak: Jika tidak full uppercase (mengandung huruf kecil spt "Budi", "Ahmad"), sembunyikan!
+      return n === n.toUpperCase();
+    });
+  }, [staffList]);
+
+  // ---------------------------------------------------------------------------
   // 1. STATE FILTER KALENDER & DYNAMIC MONTH KEY
   // ---------------------------------------------------------------------------
   const [viewMonth, setViewMonth] = useState(now.getMonth() + 1); // 1 - 12
@@ -66,7 +80,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
   const getStaffName = (id) => {
     if (!id) return '-';
-    const found = staffList.find((s) => s.id === id || s.key === id);
+    // Menggunakan activeStaffList yang sudah dibersihkan dari huruf kecil/dummy
+    const found = activeStaffList.find((s) => s.id === id || s.key === id || s.name === id || s.NAMA === id);
     if (found) {
       return found.name || found.NAMA || found.nama || found.id;
     }
@@ -153,10 +168,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const handleGeneratePiket = () => {
     if (!isAdmin) return showToast('Akses terkunci. Silakan masuk sebagai Admin!', 'error');
     if (isScheduleLocked) return showToast('Jadwal bulan ini DIKUNCI. Buka kunci terlebih dahulu!', 'error');
-    if (!staffList || staffList.length < 5) return showToast('Jumlah SDM minimal 5 orang!', 'error');
+    if (!activeStaffList || activeStaffList.length < 5) return showToast('Jumlah SDM valid minimal 5 orang!', 'error');
 
     try {
-      const newSchedule = generateMonthlySchedule(genYear, genMonth, staffList, config, holidays);
+      const newSchedule = generateMonthlySchedule(genYear, genMonth, activeStaffList, config, holidays);
       const targetKey = `${genYear}-${String(genMonth).padStart(2, '0')}`;
 
       set(ref(db, `schedules/${targetKey}`), {
@@ -201,7 +216,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     if (Object.keys(currentSchedule).filter(k => k !== 'isLocked').length === 0) {
       return showToast(`Belum ada jadwal piket ${namaBulan[viewMonth - 1]} ${viewYear} untuk dicetak!`, 'error');
     }
-    exportPiketToPDF(namaBulan[viewMonth - 1], String(viewYear), currentSchedule, staffList, config);
+    exportPiketToPDF(namaBulan[viewMonth - 1], String(viewYear), currentSchedule, activeStaffList, config);
     showToast('Mengunduh PDF Laporan Resmi...', 'info');
   };
 
@@ -445,7 +460,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       dayAssigned.forEach(id => { staffCounts[id] = (staffCounts[id] || 0) + 1; });
     });
 
-    const activeStaffCount = staffList.length || 1;
+    const activeStaffCount = activeStaffList.length || 1;
     const staffPerDay = config?.staffPerDay ? parseInt(config.staffPerDay, 10) : 2;
     const expectedTotalSlots = workingDays.length * staffPerDay;
     const avgPerPerson = Math.ceil(expectedTotalSlots / activeStaffCount) || staffPerDay; 
@@ -642,7 +657,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   // Memoized: Hitungan & Riwayat Absen Dibuat Jadi Array untuk Kebutuhan Tabel (BULANAN)
   const absenStatsArray = useMemo(() => {
     const statsMap = {};
-    staffList.forEach(s => {
+    activeStaffList.forEach(s => {
       const sId = s.id || s.key;
       statsMap[sId] = {
         id: sId,
@@ -691,14 +706,14 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         totalDenda: stat.dendaJam + stat.dendaAlpa
       })).sort((a, b) => a.name.localeCompare(b.name));
 
-  }, [currentSchedule, attendanceData, staffList, hiddenStaff]);
+  }, [currentSchedule, attendanceData, activeStaffList, hiddenStaff]);
 
   // Memoized Baru: Hitungan & Riwayat TAHUNAN (Admin Only)
   const yearlyStatsArray = useMemo(() => {
     if (rekapMode !== 'Tahunan') return [];
     
     const statsMap = {};
-    staffList.forEach(s => {
+    activeStaffList.forEach(s => {
       const sId = s.id || s.key;
       statsMap[sId] = {
         id: sId,
@@ -753,7 +768,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         totalDenda: stat.dendaJam + stat.dendaAlpa
       })).sort((a, b) => a.name.localeCompare(b.name));
 
-  }, [rekapMode, rekapYearFilter, schedules, allAttendanceData, staffList, hiddenStaff]);
+  }, [rekapMode, rekapYearFilter, schedules, allAttendanceData, activeStaffList, hiddenStaff]);
 
   // Helper untuk mendapatkan array tabel aktif
   const displayedStatsArray = rekapMode === 'Tahunan' ? yearlyStatsArray : absenStatsArray;
@@ -801,7 +816,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       }
     });
     return summaryList;
-  }, [filterStaffId, sortedDates, staffList]);
+  }, [filterStaffId, sortedDates, activeStaffList]);
 
   return (
     <div className="space-y-5 animate-fadeIn max-w-full relative">
@@ -956,7 +971,12 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                     );
                   }
 
-                  const assignedList = Array.isArray(dayData.assigned) ? dayData.assigned : [];
+                  const rawAssignedList = Array.isArray(dayData.assigned) ? dayData.assigned : [];
+                  // FILTER KALENDER: Jangan render nama ghost/dummy jika sempat tersimpan di jadwal lama
+                  const assignedList = rawAssignedList.filter(id => {
+                     return activeStaffList.some(s => (s.id || s.key) === id || s.name === id || s.NAMA === id);
+                  });
+
                   const swappedMap = dayData.swappedInfo || {};
                   const isToday = dayData.dateStr === todayStr;
 
@@ -1321,7 +1341,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
 
             <div>
               <label className="text-xs font-semibold text-slate-300 block mb-2">
-                Pilih Nama SDM / Petugas ({staffList.length} Orang Terdaftar):
+                Pilih Nama SDM / Petugas ({activeStaffList.length} Orang Terdaftar):
               </label>
               <select
                 value={filterStaffId}
@@ -1329,7 +1349,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                 className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-indigo-500/40 text-white text-xs font-bold outline-none focus:border-indigo-400 cursor-pointer"
               >
                 <option value="">-- Pilih SDM untuk Melihat Rangkuman Jadwal --</option>
-                {staffList.map((s, idx) => {
+                {activeStaffList.map((s, idx) => {
                   const sName = s.name || s.NAMA || s.nama || s.id;
                   const sId = s.id || s.key || idx;
                   return (<option key={sId} value={sId}>{sName}</option>);
@@ -1498,7 +1518,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                     </select>
                     <div className="flex gap-1.5 w-full sm:w-auto overflow-x-auto">
                         {absenSelectedDate && Array.isArray(currentSchedule[absenSelectedDate]?.assigned) ? (
-                            currentSchedule[absenSelectedDate].assigned.map(staffId => (
+                            // FILTER EXTRA: Jangan tampilkan tombol absen untuk ghost staff
+                            currentSchedule[absenSelectedDate].assigned
+                              .filter(staffId => activeStaffList.some(s => (s.id || s.key || s.name || s.NAMA) === staffId))
+                              .map(staffId => (
                                <button
                                  key={staffId}
                                  onClick={() => handleOpenAbsenModal(absenSelectedDate, staffId)}
@@ -1725,7 +1748,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                   className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-amber-500 cursor-pointer"
                 >
                   <option value="">-- Pilih Petugas --</option>
-                  {(currentSchedule[selectedDateB]?.assigned || []).map((sId) => (<option key={sId} value={sId}>{getStaffName(sId)}</option>))}
+                  {(currentSchedule[selectedDateB]?.assigned || [])
+                    // FILTER SWAP: Jangan biarkan menukar dengan ghost data
+                    .filter(sId => activeStaffList.some(active => (active.id || active.key || active.name || active.NAMA) === sId))
+                    .map((sId) => (<option key={sId} value={sId}>{getStaffName(sId)}</option>))}
                 </select>
               </div>
               <button
@@ -1825,7 +1851,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                   className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-emerald-500 cursor-pointer"
                 >
                   <option value="">-- Pilih Petugas yang Akan Ditambahkan --</option>
-                  {staffList.map((s) => (<option key={s.id || s.key} value={s.id || s.key}>{s.name || s.NAMA || s.nama || s.id}</option>))}
+                  {activeStaffList.map((s) => (<option key={s.id || s.key} value={s.id || s.key}>{s.name || s.NAMA || s.nama || s.id}</option>))}
                 </select>
               </div>
               <button
