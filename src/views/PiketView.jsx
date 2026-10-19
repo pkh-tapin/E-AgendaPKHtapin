@@ -29,8 +29,8 @@ import {
   faCommentDots,
   faSignInAlt,    
   faSignOutAlt,
-  faEyeSlash,     // TAMBAHAN UNTUK SEMBUNYIKAN NAMA
-  faUndo          // TAMBAHAN UNTUK KEMBALIKAN NAMA
+  faEyeSlash,     
+  faUndo          
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
@@ -648,7 +648,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         id: sId,
         name: s.name || s.NAMA || s.nama || s.id,
         totalJatah: 0, totalHadir: 0, totalIzin: 0, totalAlpa: 0,
-        totalKurangJam: 0, dendaJam: 0, dendaAlpa: 0, totalDenda: 0
+        totalJamKerja: 0, totalKurangJam: 0, dendaJam: 0, dendaAlpa: 0, totalDenda: 0
       };
     });
 
@@ -665,6 +665,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
           if (attRecord.status === 'Hadir') {
              statsMap[staffId].totalHadir += 1;
              const jk = Number(attRecord.jamKerja) || 0;
+             statsMap[staffId].totalJamKerja += jk;
              if (jk < 4) {
                const kurang = 4 - jk;
                statsMap[staffId].totalKurangJam += kurang;
@@ -685,6 +686,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       .filter(stat => !hiddenStaff.includes(stat.id))
       .map(stat => ({
         ...stat,
+        totalJamKerja: Number(stat.totalJamKerja.toFixed(2)),
+        totalKurangJam: Number(stat.totalKurangJam.toFixed(2)),
         totalDenda: stat.dendaJam + stat.dendaAlpa
       })).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -701,7 +704,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         id: sId,
         name: s.name || s.NAMA || s.nama || s.id,
         totalJatah: 0, totalHadir: 0, totalIzin: 0, totalAlpa: 0,
-        totalKurangJam: 0, dendaJam: 0, dendaAlpa: 0, totalDenda: 0
+        totalJamKerja: 0, totalKurangJam: 0, dendaJam: 0, dendaAlpa: 0, totalDenda: 0
       };
     });
 
@@ -723,6 +726,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                    if (attRecord.status === 'Hadir') {
                       statsMap[staffId].totalHadir += 1;
                       const jk = Number(attRecord.jamKerja) || 0;
+                      statsMap[staffId].totalJamKerja += jk;
                       if (jk < 4) {
                         const kurang = 4 - jk;
                         statsMap[staffId].totalKurangJam += kurang;
@@ -744,6 +748,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       .filter(stat => !hiddenStaff.includes(stat.id))
       .map(stat => ({
         ...stat,
+        totalJamKerja: Number(stat.totalJamKerja.toFixed(2)),
+        totalKurangJam: Number(stat.totalKurangJam.toFixed(2)),
         totalDenda: stat.dendaJam + stat.dendaAlpa
       })).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1535,7 +1541,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                     <th className="p-3 border-b border-white/10 font-bold text-center text-rose-400">Alpa</th>
                     {isAdmin && (
                       <>
-                        <th className="p-3 border-b border-white/10 font-bold text-center text-orange-400 border-l border-white/5">Kurang Jam</th>
+                        <th className="p-3 border-b border-white/10 font-bold text-center text-cyan-400 border-l border-white/5">Total Jam</th>
+                        <th className="p-3 border-b border-white/10 font-bold text-center text-orange-400">Kurang Jam</th>
                         <th className="p-3 border-b border-white/10 font-bold text-right text-orange-400">Denda Jam</th>
                         <th className="p-3 border-b border-white/10 font-bold text-right text-rose-500">Denda Alpa</th>
                         <th className="p-3 border-b border-white/10 font-black text-right text-white">Total Denda</th>
@@ -1555,7 +1562,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                         <td className="p-3 text-center text-rose-300 font-bold">{stat.totalAlpa}</td>
                         {isAdmin && (
                           <>
-                            <td className="p-3 text-center text-orange-300 font-bold border-l border-white/5">
+                            <td className="p-3 text-center text-cyan-300 font-bold border-l border-white/5">
+                              {stat.totalJamKerja > 0 ? `${stat.totalJamKerja} Jam` : '-'}
+                            </td>
+                            <td className="p-3 text-center text-orange-300 font-bold">
                               {stat.totalKurangJam > 0 ? `${stat.totalKurangJam} Jam` : '-'}
                             </td>
                             <td className="p-3 text-right text-orange-300 font-mono tracking-tighter">
@@ -1582,7 +1592,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={isAdmin ? 10 : 5} className="p-8 text-center text-slate-500 italic">Data petugas tidak ditemukan atau kosong.</td>
+                      <td colSpan={isAdmin ? 11 : 5} className="p-8 text-center text-slate-500 italic">Data petugas tidak ditemukan atau kosong.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1614,8 +1624,8 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                   <div className="p-3 bg-rose-950/30 border border-rose-500/20 rounded-xl text-[10px] text-rose-200">
                      <strong className="text-rose-400"><FontAwesomeIcon icon={faMoneyBillWave}/> Ketentuan Denda (Hanya Tampil di Admin):</strong> 
                      <ul className="list-disc pl-4 mt-1">
-                       <li>Standar piket adalah 4 Jam. Kekurangan jam piket didenda <strong>Rp 10.000 / Jam</strong>.</li>
-                       <li>Tanpa keterangan / Alpa didenda tetap <strong>Rp 50.000 / Hari</strong>.</li>
+                       <li>Standar piket adalah 4 Jam. Kekurangan jam piket dikalikan <strong>Rp 10.000 / Jam</strong> (Rp 10.000 per 60 menit).</li>
+                       <li>Tidak piket sama sekali (Tanpa Keterangan / Alpa) didenda tetap <strong>Rp 50.000 / Hari</strong>.</li>
                      </ul>
                   </div>
                </div>
