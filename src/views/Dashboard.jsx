@@ -1,1524 +1,1119 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { db, ref, set, push, remove, onValue, update } from '../firebase';
+import React, { useState, useEffect } from 'react';
+import { db, ref, remove, update, onValue } from '../firebase';
 import { useToast } from '../context/ToastContext';
-import { exportPiketToPDF } from '../utils/pdfExporter';
-import { generateMonthlySchedule } from '../utils/piketGenerator';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
-  faSync, 
-  faFilePdf, 
+  faCalendarCheck, 
+  faUserShield, 
   faExchangeAlt, 
-  faTimes, 
-  faCalendarAlt, 
-  faClock,
+  faTasks, 
+  faClipboardList, 
+  faInfoCircle, 
+  faTimes,
   faHourglassHalf,
-  faUserCheck,
-  faLock,
-  faUnlock,
-  faTrashAlt,
-  faHistory,
-  faSearch,
+  faExclamationTriangle,
+  faGlobe,
   faUser,
-  faFilter,
-  faCalendarCheck,
-  faPlus,
-  faClipboardCheck, // TAMBAHAN UNTUK ABSEN
-  faCheck,          // TAMBAHAN UNTUK ABSEN
-  faTimesCircle     // TAMBAHAN UNTUK ABSEN
+  faMapMarkerAlt,
+  faCalendarAlt,
+  faClock,
+  faTrashAlt,
+  faEdit,
+  faShieldAlt,
+  faSave,
+  faBullhorn,
+  faStickyNote,
+  faExclamationCircle,
+  faCheckCircle,
+  faListAlt,
+  faMapPin
 } from '@fortawesome/free-solid-svg-icons';
 
-export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
+export default function Dashboard({ 
+  todayPiket = [], 
+  todayAgenda = [], 
+  agendas = [],
+  swapLogs = [], 
+  tasks = [], 
+  staffList = [], 
+  config = {}, 
+  isAdmin = false 
+}) {
   const { showToast } = useToast();
-  const now = new Date();
+  const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
+  const [editLogModalOpen, setEditLogModalOpen] = useState(false);
+  const [editingLog, setEditingLog] = useState(null);
 
-  // PENENTUAN MODE PUBLIK (Hanya bisa melihat)
-  const isPublic = !isAdmin && !isSdm;
+  // Tab Filter Agenda: 'today' | 'upcoming3'
+  const [agendaTab, setAgendaTab] = useState('today');
 
-  // ---------------------------------------------------------------------------
-  // 1. STATE FILTER KALENDER & DYNAMIC MONTH KEY
-  // ---------------------------------------------------------------------------
-  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1); // 1 - 12
-  const [viewYear, setViewYear] = useState(now.getFullYear());
+  // -------------------------------------------------------------
+  // STATE PENGUMUMAN & CATATAN SDM (REALTIME DISPLAY)
+  // -------------------------------------------------------------
+  const [infoList, setInfoList] = useState([]);
+  const [notesList, setNotesList] = useState([]);
 
+  useEffect(() => {
+    const infoRef = ref(db, 'infoList');
+    const unsubscribe = onValue(infoRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const list = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+        setInfoList(list.reverse());
+      } else {
+        setInfoList([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const notesRef = ref(db, 'dashboardNotes');
+    const unsubscribe = onValue(notesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const list = Object.entries(data).map(([id, val]) => ({ id, ...val }));
+        setNotesList(list.reverse());
+      } else {
+        setNotesList([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const getStaffName = (id) => {
+    const found = staffList.find((s) => (typeof s === 'object' ? s.id === id || s.name === id || s.NAMA === id : s === id));
+    if (found) return typeof found === 'object' ? found.name || found.NAMA || found.nama || found.id : found;
+    return id;
+  };
+
+  const getTargetText = (task) => {
+    if (task.targetType === 'all') return 'Seluruh SDM';
+    if (task.targetType === 'specific') return `${getStaffName(task.assignee)}`;
+    if (task.targetType === 'kecamatan') return `Kec. ${task.kecamatan || '-'}`;
+    return 'SDM Terkait';
+  };
+
+  // -------------------------------------------------------------
+  // REAL-TIME CLOCK ENGINE & TANGGAL
+  // -------------------------------------------------------------
+  const [nowTimestamp, setNowTimestamp] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTimestamp(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dateObj = new Date(nowTimestamp);
+  const namaHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const namaBulan = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
     "Juli", "Agustus", "September", "Oktober", "November", "Desember"
   ];
 
-  const currentMonthKey = `${viewYear}-${String(viewMonth).padStart(2, '0')}`;
-  const currentSchedule = schedules[currentMonthKey] || {};
-  const isScheduleLocked = !!currentSchedule.isLocked;
+  const currentDayName = namaHari[dateObj.getDay()];
+  const currentDayNum = dateObj.getDate();
+  const currentMonthName = namaBulan[dateObj.getMonth()];
+  const currentYear = dateObj.getFullYear();
+  const fullFormattedDate = `${currentDayName}, ${currentDayNum} ${currentMonthName} ${currentYear}`;
 
-  // Tanggal Hari Ini untuk penanda (Format: YYYY-MM-DD)
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const hoursStr = String(dateObj.getHours()).padStart(2, '0');
+  const minutesStr = String(dateObj.getMinutes()).padStart(2, '0');
+  const secondsStr = String(dateObj.getSeconds()).padStart(2, '0');
 
-  // ---------------------------------------------------------------------------
-  // 2. STATE SUB-MENU FILTER JADWAL SDM
-  // ---------------------------------------------------------------------------
-  const [sdmFilterSubMenuOpen, setSdmFilterSubMenuOpen] = useState(false);
-  const [filterStaffId, setFilterStaffId] = useState('');
+  // Variabel todayStr diangkat ke atas agar dapat digunakan oleh Realtime Engine Piket
+  const todayStr = `${currentYear}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(currentDayNum).padStart(2,'0')}`;
 
-  // Helper Resolver Nama SDM
-  const getStaffName = (id) => {
-    if (!id) return '-';
-    const found = staffList.find((s) => s.id === id || s.key === id);
-    if (found) {
-      return found.name || found.NAMA || found.nama || found.id;
-    }
-    return id;
-  };
+  // -------------------------------------------------------------
+  // REAL-TIME JADWAL PIKET HARI BERJALAN (UPDATE OTOMATIS)
+  // -------------------------------------------------------------
+  const [realtimePiket, setRealtimePiket] = useState(null);
 
-  // ---------------------------------------------------------------------------
-  // 3. STATE MODAL GENERATE PIKET & SUB-MENU LOG TUKAR
-  // ---------------------------------------------------------------------------
-  const [genModalOpen, setGenModalOpen] = useState(false);
-  const [genMonth, setGenMonth] = useState(() => (now.getMonth() === 11 ? 1 : now.getMonth() + 2));
-  const [genYear, setGenYear] = useState(() => (now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear()));
-
-  const [logsSubMenuOpen, setLogsSubMenuOpen] = useState(false);
-  const [swapLogs, setSwapLogs] = useState([]);
-
-  // ---------------------------------------------------------------------------
-  // 4. STATE MODAL TUKAR & REALTIME TIMER & TAMBAH PETUGAS (ADMIN)
-  // ---------------------------------------------------------------------------
-  const [swapModalOpen, setSwapModalOpen] = useState(false);
-  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-  const [activeRequest, setActiveRequest] = useState(null);
-
-  const [selectedStaffA, setSelectedStaffA] = useState('');
-  const [selectedDateA, setSelectedDateA] = useState('');
-  const [selectedDateB, setSelectedDateB] = useState('');
-  const [selectedStaffB, setSelectedStaffB] = useState('');
-
-  const [pendingRequests, setPendingRequests] = useState([]);
-  const [nowTimestamp, setNowTimestamp] = useState(Date.now());
-
-  // STATE UNTUK TAMBAH PETUGAS KHUSUS ADMIN
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [selectedDateToAdd, setSelectedDateToAdd] = useState('');
-  const [selectedStaffToAdd, setSelectedStaffToAdd] = useState('');
-
-  // Realtime Timer 1 Detik
   useEffect(() => {
-    const timer = setInterval(() => setNowTimestamp(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Fetch Usulan Tukar Realtime (Auto-Delete > 8 Jam)
-  useEffect(() => {
-    const pendingRef = ref(db, 'swapRequests');
-    const unsubscribe = onValue(pendingRef, (snapshot) => {
+    const currentMonthKey = todayStr.substring(0, 7);
+    const piketRef = ref(db, `schedules/${currentMonthKey}/${todayStr}/assigned`);
+    
+    const unsubscribe = onValue(piketRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        const list = Object.entries(data).map(([id, val]) => ({ id, ...val }));
-        const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
-
-        list.forEach((req) => {
-          if (Date.now() - req.timestamp >= EIGHT_HOURS_MS) {
-            remove(ref(db, `swapRequests/${req.id}`)).catch(() => {});
-          }
-        });
-
-        setPendingRequests(list.filter((req) => Date.now() - req.timestamp < EIGHT_HOURS_MS));
+        setRealtimePiket(Array.isArray(data) ? data : Object.values(data));
       } else {
-        setPendingRequests([]);
+        setRealtimePiket([]); // Kosongkan jika tidak ada jadwal piket hari ini
       }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Fetch Log Pertukaran Realtime (Scope Per Bulan)
-  useEffect(() => {
-    const logsRef = ref(db, 'swaps');
-    const unsubscribe = onValue(logsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const list = Object.entries(data)
-          .map(([id, val]) => ({ id, ...val }))
-          .filter((log) => log.monthKey === currentMonthKey || !log.monthKey);
-        setSwapLogs(list);
-      } else {
-        setSwapLogs([]);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [currentMonthKey]);
-
-  // ---------------------------------------------------------------------------
-  // 5. HANDLER GENERATE, KUNCI, & RESET JADWAL (ADMIN)
-  // ---------------------------------------------------------------------------
-  const handleGeneratePiket = () => {
-    if (!isAdmin) return showToast('Akses terkunci. Silakan masuk sebagai Admin!', 'error');
-    if (isScheduleLocked) return showToast('Jadwal bulan ini DIKUNCI. Buka kunci terlebih dahulu!', 'error');
-    if (!staffList || staffList.length < 5) return showToast('Jumlah SDM minimal 5 orang!', 'error');
-
-    try {
-      const newSchedule = generateMonthlySchedule(genYear, genMonth, staffList, config, holidays);
-      const targetKey = `${genYear}-${String(genMonth).padStart(2, '0')}`;
-
-      set(ref(db, `schedules/${targetKey}`), {
-        ...newSchedule,
-        isLocked: false
-      });
-
-      setViewMonth(genMonth);
-      setViewYear(genYear);
-      setGenModalOpen(false);
-
-      showToast(`Jadwal piket ${namaBulan[genMonth - 1]} ${genYear} berhasil diacak!`, 'success');
-    } catch (err) {
-      console.error("Gagal generate piket:", err);
-      showToast('Terjadi kesalahan saat mengacak jadwal.', 'error');
-    }
-  };
-
-  const handleToggleLockSchedule = () => {
-    if (!isAdmin) return showToast('Hanya Admin yang dapat mengunci jadwal!', 'error');
-    const newLockStatus = !isScheduleLocked;
-
-    update(ref(db, `schedules/${currentMonthKey}`), { isLocked: newLockStatus });
-    showToast(newLockStatus ? 'Jadwal resmi DIKUNCI!' : 'Kunci jadwal DIBUKA.', 'info');
-  };
-
-  // FITUR RESET SELURUH JADWAL BULAN INI (ADMIN)
-  const handleResetMonthlySchedule = async () => {
-    if (!isAdmin) return showToast('Akses terkunci. Khusus Admin!', 'error');
-    if (isScheduleLocked) return showToast('Jadwal bulan ini DIKUNCI. Buka kunci terlebih dahulu!', 'error');
-
-    if (window.confirm(`PERHATIAN! Apakah Anda yakin ingin MERESET/MENGHAPUS SELURUH JADWAL PIKET bulan ${namaBulan[viewMonth - 1]} ${viewYear}?`)) {
-      try {
-        await remove(ref(db, `schedules/${currentMonthKey}`));
-        showToast(`Jadwal piket bulan ${namaBulan[viewMonth - 1]} ${viewYear} berhasil di-reset!`, 'info');
-      } catch (err) {
-        showToast('Gagal mereset jadwal piket.', 'error');
-      }
-    }
-  };
-
-  const handleExportPDF = () => {
-    if (Object.keys(currentSchedule).filter(k => k !== 'isLocked').length === 0) {
-      return showToast(`Belum ada jadwal piket ${namaBulan[viewMonth - 1]} ${viewYear} untuk dicetak!`, 'error');
-    }
-    exportPiketToPDF(namaBulan[viewMonth - 1], String(viewYear), currentSchedule, staffList, config);
-    showToast('Mengunduh PDF Laporan Resmi...', 'info');
-  };
-
-  const handleCardClick = (dateStr, staffId) => {
-    // BLOKIR AKSES JIKA PENGGUNA ADALAH PUBLIK
-    if (isPublic) {
-      showToast('Akses Publik: Anda hanya dapat melihat jadwal piket.', 'info');
-      return;
-    }
-
-    const existingReq = pendingRequests.find(
-      (r) => (r.staffA === staffId && r.dateA === dateStr) || (r.staffB === staffId && r.dateB === dateStr)
-    );
-
-    if (existingReq) {
-      setActiveRequest(existingReq);
-      setConfirmModalOpen(true);
-    } else {
-      setSelectedDateA(dateStr);
-      setSelectedStaffA(staffId);
-      setSelectedDateB('');
-      setSelectedStaffB('');
-      setSwapModalOpen(true);
-    }
-  };
-
-  // FITUR HAPUS PETUGAS SATUAN DARI TANGGAL PIKET (ADMIN)
-  const handleRemoveStaffFromDate = async () => {
-    if (!isAdmin) return showToast('Akses khusus Admin!', 'error');
-    if (!selectedDateA || !selectedStaffA) return;
-
-    const dayNum = new Date(selectedDateA).getDate();
-
-    if (window.confirm(`Hapus ${getStaffName(selectedStaffA)} dari piket tanggal ${dayNum}?`)) {
-      try {
-        const scheduleA = currentSchedule[selectedDateA] || {};
-        const assignedA = Array.isArray(scheduleA.assigned) ? scheduleA.assigned : [];
-        const newAssignedA = assignedA.filter((id) => id !== selectedStaffA);
-
-        const swappedInfoA = { ...(scheduleA.swappedInfo || {}) };
-        delete swappedInfoA[selectedStaffA];
-
-        await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/assigned`), newAssignedA);
-        
-        // PENGAMANAN ERROR FIREBASE (TIDAK BOLEH SET OBJECT KOSONG KE FIREBASE)
-        if (Object.keys(swappedInfoA).length === 0) {
-          await remove(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`));
-        } else {
-          await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`), swappedInfoA);
-        }
-
-        showToast(`Petugas ${getStaffName(selectedStaffA)} berhasil dihapus dari tanggal ${dayNum}!`, 'success');
-        setSwapModalOpen(false);
-      } catch (err) {
-        showToast('Gagal menghapus petugas piket.', 'error');
-      }
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // 6. HANDLER TUKAR PIKET (ADMIN = INSTANT, USER = 8 JAM)
-  // ---------------------------------------------------------------------------
-  const handleCreateSwapRequest = async (e) => {
-    e.preventDefault();
-    if (!selectedDateB || !selectedStaffB) return showToast('Pilih tanggal & petugas pasangan tukar!', 'error');
-    if (selectedDateA === selectedDateB && selectedStaffA === selectedStaffB) return showToast('Tidak bisa menukar petugas yang sama!', 'error');
-    if (selectedDateA === selectedDateB) return showToast('Harap pilih tanggal yang berbeda untuk menukar!', 'error');
-
-    const dayNumA = new Date(selectedDateA).getDate();
-    const dayNumB = new Date(selectedDateB).getDate();
-
-    // AKSI ADMIN: EKSEKUSI BERSIH TANPA MENCATAT SWAPPED INFO
-    if (isAdmin) {
-      try {
-        const scheduleA = currentSchedule[selectedDateA] || {};
-        const scheduleB = currentSchedule[selectedDateB] || {};
-
-        const assignedA = Array.isArray(scheduleA.assigned) ? scheduleA.assigned : [];
-        const assignedB = Array.isArray(scheduleB.assigned) ? scheduleB.assigned : [];
-
-        const newAssignedA = assignedA.map((id) => (id === selectedStaffA ? selectedStaffB : id));
-        const newAssignedB = assignedB.map((id) => (id === selectedStaffB ? selectedStaffA : id));
-
-        const swappedInfoA = { ...(scheduleA.swappedInfo || {}) };
-        delete swappedInfoA[selectedStaffA];
-        delete swappedInfoA[selectedStaffB];
-
-        const swappedInfoB = { ...(scheduleB.swappedInfo || {}) };
-        delete swappedInfoB[selectedStaffA];
-        delete swappedInfoB[selectedStaffB];
-
-        await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/assigned`), newAssignedA);
-        
-        if (Object.keys(swappedInfoA).length === 0) {
-           await remove(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`));
-        } else {
-           await set(ref(db, `schedules/${currentMonthKey}/${selectedDateA}/swappedInfo`), swappedInfoA);
-        }
-
-        await set(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/assigned`), newAssignedB);
-        
-        if (Object.keys(swappedInfoB).length === 0) {
-           await remove(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/swappedInfo`));
-        } else {
-           await set(ref(db, `schedules/${currentMonthKey}/${selectedDateB}/swappedInfo`), swappedInfoB);
-        }
-
-        showToast('Admin berhasil menukar jadwal secara langsung (Tanpa Tanda)!', 'success');
-        setSwapModalOpen(false);
-        return;
-      } catch (err) {
-        return showToast('Gagal memproses pertukaran jadwal oleh Admin.', 'error');
-      }
-    }
-
-    // MODE USER BIASA: USULAN TUKAR 8 JAM
-    try {
-      const newReqRef = push(ref(db, 'swapRequests'));
-      await set(newReqRef, {
-        dateA: selectedDateA,
-        staffA: selectedStaffA,
-        dayNumberA: dayNumA,
-        dateB: selectedDateB,
-        staffB: selectedStaffB,
-        dayNumberB: dayNumB,
-        approvedA: false,
-        approvedB: false,
-        timestamp: Date.now()
-      });
-
-      showToast(`Usulan tukar diajukan! Batas waktu konfirmasi 8 jam dimulai.`, 'success');
-      setSwapModalOpen(false);
-    } catch (err) {
-      showToast('Akses Firebase ditolak.', 'error');
-    }
-  };
-
-  // HANDLER KONFIRMASI DUA PIHAK
-  const handleToggleApprove = async (party) => {
-    if (!activeRequest) return;
-
-    const updates = {};
-    if (party === 'A') updates.approvedA = !activeRequest.approvedA;
-    if (party === 'B') updates.approvedB = !activeRequest.approvedB;
-
-    const updatedReq = { ...activeRequest, ...updates };
-
-    try {
-      await update(ref(db, `swapRequests/${activeRequest.id}`), updates);
-      setActiveRequest(updatedReq);
-
-      if (updatedReq.approvedA && updatedReq.approvedB) {
-        const scheduleA = currentSchedule[updatedReq.dateA] || {};
-        const scheduleB = currentSchedule[updatedReq.dateB] || {};
-
-        const assignedA = Array.isArray(scheduleA.assigned) ? scheduleA.assigned : [];
-        const assignedB = Array.isArray(scheduleB.assigned) ? scheduleB.assigned : [];
-
-        const newAssignedA = assignedA.map((id) => (id === updatedReq.staffA ? updatedReq.staffB : id));
-        const newAssignedB = assignedB.map((id) => (id === updatedReq.staffB ? updatedReq.staffA : id));
-
-        const swappedInfoA = {
-          ...(scheduleA.swappedInfo || {}),
-          [updatedReq.staffB]: { original: updatedReq.staffA, originalDateNum: updatedReq.dayNumberA, swappedDateNum: updatedReq.dayNumberB }
-        };
-        const swappedInfoB = {
-          ...(scheduleB.swappedInfo || {}),
-          [updatedReq.staffA]: { original: updatedReq.staffB, originalDateNum: updatedReq.dayNumberB, swappedDateNum: updatedReq.dayNumberA }
-        };
-
-        await set(ref(db, `schedules/${currentMonthKey}/${updatedReq.dateA}/assigned`), newAssignedA);
-        await set(ref(db, `schedules/${currentMonthKey}/${updatedReq.dateA}/swappedInfo`), swappedInfoA);
-
-        await set(ref(db, `schedules/${currentMonthKey}/${updatedReq.dateB}/assigned`), newAssignedB);
-        await set(ref(db, `schedules/${currentMonthKey}/${updatedReq.dateB}/swappedInfo`), swappedInfoB);
-
-        // Catat Log Pertukaran User
-        await push(ref(db, 'swaps'), {
-          staffA: updatedReq.staffA,
-          dateA: updatedReq.dateA,
-          dayNumberA: updatedReq.dayNumberA,
-          staffB: updatedReq.staffB,
-          dateB: updatedReq.dateB,
-          dayNumberB: updatedReq.dayNumberB,
-          monthKey: currentMonthKey,
-          timestamp: Date.now()
-        });
-
-        await remove(ref(db, `swapRequests/${updatedReq.id}`));
-        setConfirmModalOpen(false);
-        showToast('Keduanya setuju! Jadwal resmi bertukar.', 'success');
-      } else {
-        showToast('Persetujuan dicatat. Menunggu pasangan tukar...', 'info');
-      }
-    } catch (err) {
-      showToast('Gagal memproses persetujuan.', 'error');
-    }
-  };
-
-  // HAPUS LOG SATUAN (ADMIN)
-  const handleDeleteLog = async (logId) => {
-    if (!isAdmin) return showToast('Akses terbatas khusus Admin!', 'error');
-    if (window.confirm('Hapus riwayat log tukar ini dari sistem?')) {
-      await remove(ref(db, `swaps/${logId}`));
-      showToast('Log tukar berhasil dihapus!', 'info');
-    }
-  };
-
-  // HAPUS SEMUA LOG (ADMIN)
-  const handleClearAllLogs = async () => {
-    if (!isAdmin) return showToast('Akses terbatas khusus Admin!', 'error');
-    if (window.confirm('PERHATIAN! Apakah Anda yakin ingin MENGHAPUS SELURUH LOG TUKAR?')) {
-      await remove(ref(db, 'swaps'));
-      showToast('Seluruh log tukar berhasil dibersihkan!', 'info');
-    }
-  };
-
-  const renderCountdown = (startTimestamp) => {
-    const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
-    const elapsed = nowTimestamp - startTimestamp;
-    const remaining = Math.max(0, EIGHT_HOURS_MS - elapsed);
-
-    const hours = Math.floor(remaining / (1000 * 60 * 60));
-    const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
-
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-  };
-
-  // ---------------------------------------------------------------------------
-  // 6.5. HANDLER TAMBAH PETUGAS PIKET MANUAL (KHUSUS ADMIN DENGAN LOGIKA KETAT)
-  // ---------------------------------------------------------------------------
-  const handleOpenAddModal = (dateStr) => {
-    setSelectedDateToAdd(dateStr);
-    setSelectedStaffToAdd('');
-    setAddModalOpen(true);
-  };
-
-  const handleAddStaff = async (e) => {
-    e.preventDefault();
-    if (!isAdmin) return showToast('Akses ditolak! Khusus Admin.', 'error');
-    if (!selectedDateToAdd || !selectedStaffToAdd) return showToast('Pilih petugas yang akan ditambahkan!', 'error');
-
-    const scheduleData = currentSchedule[selectedDateToAdd] || {};
-    const assigned = Array.isArray(scheduleData.assigned) ? scheduleData.assigned : [];
-
-    // Validasi Basic: Apakah orang ini sudah piket di tanggal yang dipilih?
-    if (assigned.includes(selectedStaffToAdd)) {
-      return showToast('Petugas tersebut sudah piket di tanggal ini!', 'error');
-    }
-
-    const workingDays = Object.entries(currentSchedule)
-      .filter(([key, val]) => key !== 'isLocked' && val && typeof val === 'object' && !val.isHoliday)
-      .map(([key, val]) => ({ dateStr: key, ...val }));
-    
-    let staffCounts = {};
-    
-    workingDays.forEach(day => {
-      const dayAssigned = Array.isArray(day.assigned) ? day.assigned : [];
-      dayAssigned.forEach(id => {
-        staffCounts[id] = (staffCounts[id] || 0) + 1;
-      });
-    });
-
-    const activeStaffCount = staffList.length || 1;
-    const staffPerDay = config?.staffPerDay ? parseInt(config.staffPerDay, 10) : 2;
-    const expectedTotalSlots = workingDays.length * staffPerDay;
-    
-    const avgPerPerson = Math.ceil(expectedTotalSlots / activeStaffCount) || staffPerDay; 
-    
-    const currentCount = staffCounts[selectedStaffToAdd] || 0;
-
-    // VALIDASI KETAT 1 (HARD BLOCK)
-    if (currentCount >= avgPerPerson) {
-      showToast(`TIDAK BISA DISIMPAN! Jatah piket ${getStaffName(selectedStaffToAdd)} sudah penuh (Batas: ${avgPerPerson} kali bulan ini). Semua harus terbagi rata!`, 'error');
-      return;
-    }
-
-    // VALIDASI KETAT 2 (SOFT BLOCK)
-    let isTooClose = false;
-    const addDateObj = new Date(selectedDateToAdd);
-    workingDays.forEach(day => {
-      if ((day.assigned || []).includes(selectedStaffToAdd)) {
-        const dayObj = new Date(day.dateStr);
-        const diffDays = Math.abs(addDateObj - dayObj) / (1000 * 60 * 60 * 24);
-        if (diffDays <= 2) {
-          isTooClose = true;
-        }
-      }
-    });
-
-    if (isTooClose) {
-      if (!window.confirm(`PERINGATAN LOGIKA:\n\nJarak hari piket ${getStaffName(selectedStaffToAdd)} terlalu dekat (≤ 2 Hari) dengan jadwal dia yang lain!\n\nKarena jatahnya belum penuh (${currentCount}/${avgPerPerson}), Anda tetap BISA MENYIMPANNYA secara paksa.\nTetap lanjutkan simpan?`)) {
-        return;
-      }
-    } else {
-      if (!window.confirm(`Konfirmasi:\nTambahkan ${getStaffName(selectedStaffToAdd)} ke tanggal ${new Date(selectedDateToAdd).getDate()}?\n(Saat ini dia sudah bertugas ${currentCount} kali, batas bulan ini: ${avgPerPerson} kali).`)) {
-          return;
-      }
-    }
-
-    // PROSES SIMPAN PENAMBAHAN KE DATABASE
-    try {
-      const newAssigned = [...assigned, selectedStaffToAdd];
-      await set(ref(db, `schedules/${currentMonthKey}/${selectedDateToAdd}/assigned`), newAssigned);
-      showToast(`Berhasil menambahkan ${getStaffName(selectedStaffToAdd)} ke tanggal ${new Date(selectedDateToAdd).getDate()}!`, 'success');
-      setAddModalOpen(false);
-    } catch (err) {
-      showToast('Gagal menambahkan petugas ke database', 'error');
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // 6.7. BAGIAN BARU: STATE, EFFECT, & HANDLER ABSEN PIKET, HITUNGAN & RIWAYAT
-  // ---------------------------------------------------------------------------
-  const [absenSubMenuOpen, setAbsenSubMenuOpen] = useState(false);
-  const [attendanceData, setAttendanceData] = useState({});
-  const [absenSelectedDate, setAbsenSelectedDate] = useState(todayStr);
-  const [absenSelectedStaff, setAbsenSelectedStaff] = useState('');
-
-  // Fetch Data Absensi Realtime dari Firebase
-  useEffect(() => {
-    const attRef = ref(db, `attendance/${currentMonthKey}`);
-    const unsubscribe = onValue(attRef, (snapshot) => {
-      setAttendanceData(snapshot.val() || {});
     });
     return () => unsubscribe();
-  }, [currentMonthKey]);
+  }, [todayStr]);
 
-  // Handler Set Absen Harian
-  const handleSetAttendance = async (dateStr, staffId, status) => {
-    if (isPublic) return showToast('Akses Publik: Tidak bisa mengisi absen!', 'error');
-    try {
-      await set(ref(db, `attendance/${currentMonthKey}/${dateStr}/${staffId}`), {
-        status,
-        timestamp: Date.now(),
-        markedBy: isAdmin ? 'Admin' : 'Petugas'
-      });
-      showToast(`Absen ${status} untuk ${getStaffName(staffId)} berhasil dicatat!`, 'success');
-    } catch (err) {
-      showToast('Gagal mencatat absen.', 'error');
-    }
+  const formatIndoDate = (dateStr) => {
+    if (!dateStr) return '-';
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (isNaN(d.getTime())) return dateStr;
+    return `${namaHari[d.getDay()]}, ${d.getDate()} ${namaBulan[d.getMonth()]} ${d.getFullYear()}`;
   };
 
-  // Memoized: Hitungan & Riwayat Absen Per SDM untuk bulan ini
-  const absenStats = useMemo(() => {
-    const stats = {};
-    // Inisialisasi semua staf terdaftar
-    staffList.forEach(s => {
-      const sId = s.id || s.key;
-      stats[sId] = {
-        totalJatah: 0,
-        totalHadir: 0,
-        totalTidak: 0, // Alpa/Sakit/Izin
-        riwayat: []
-      };
+  const getLocalFormat = (input) => {
+    if (!input) return { dateStr: '', timeStr: '23:59' };
+    if (!input.includes('T')) return { dateStr: input, timeStr: '23:59' };
+    
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return { dateStr: input.split('T')[0], timeStr: '23:59' };
+    
+    const pad = (n) => String(n).padStart(2, '0');
+    return {
+      dateStr: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      timeStr: `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    };
+  };
+
+  // -------------------------------------------------------------
+  // GROUPING LOGIC: DEADLINE & AGENDA DALAM SATU CARD (BY DATE)
+  // -------------------------------------------------------------
+  const combinedItems = [];
+
+  tasks.forEach(task => {
+    const rawDate = task.dueDateTime || task.deadline || task.dueDate || '';
+    const { dateStr, timeStr } = getLocalFormat(rawDate);
+    combinedItems.push({
+      ...task,
+      itemType: 'task',
+      sortDate: dateStr,
+      sortTime: timeStr,
+      timestamp: new Date(`${dateStr}T${timeStr.length === 5 ? timeStr + ':00' : timeStr}`).getTime()
     });
-
-    Object.entries(currentSchedule).forEach(([dateStr, dayData]) => {
-      if (dateStr === 'isLocked' || !dayData.assigned) return;
-      const dayAtt = attendanceData[dateStr] || {};
-      
-      dayData.assigned.forEach(staffId => {
-        if (!stats[staffId]) return;
-        stats[staffId].totalJatah += 1;
-        
-        const status = dayAtt[staffId]?.status;
-        if (status === 'Hadir') stats[staffId].totalHadir += 1;
-        else if (status) stats[staffId].totalTidak += 1; // Any status besides Hadir
-
-        stats[staffId].riwayat.push({
-          dateStr,
-          dayNumber: dayData.dayNumber,
-          dayName: dayData.dayName,
-          status: status || 'Belum Absen'
-        });
-      });
-    });
-
-    return stats;
-  }, [currentSchedule, attendanceData, staffList]);
-
-  // ---------------------------------------------------------------------------
-  // 7. STRUKTURISASI MINGGU & RANGKUMAN FILTER SDM
-  // ---------------------------------------------------------------------------
-  const weekDaysHeader = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
-  const sortedDates = Object.entries(currentSchedule)
-    .filter(([key]) => key !== 'isLocked')
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  const weeksMap = {};
-  let dynamicWeek = 1;
-
-  sortedDates.forEach(([dateStr, item], idx) => {
-    const dateObj = new Date(dateStr);
-    const dayOfWeek = item.dayOfWeek || dateObj.getDay();
-
-    if (idx > 0 && dayOfWeek === 1) dynamicWeek++;
-
-    const wIdx = item.weekIndex || dynamicWeek;
-    if (!weeksMap[wIdx]) weeksMap[wIdx] = {};
-    weeksMap[wIdx][item.dayName] = { dateStr, ...item };
   });
 
-  // Rangkuman Jadwal SDM Terpilih
-  const selectedStaffScheduleSummary = useMemo(() => {
-    if (!filterStaffId) return [];
+  agendas.forEach(ag => {
+    const rawDate = ag.date || '';
+    const { dateStr, timeStr } = getLocalFormat(rawDate);
+    if (dateStr >= todayStr) {
+      const fixedTime = ag.time || timeStr || '23:59';
+      combinedItems.push({
+        ...ag,
+        itemType: 'agenda',
+        sortDate: dateStr,
+        sortTime: fixedTime,
+        timestamp: new Date(`${dateStr}T${fixedTime.length === 5 ? fixedTime + ':00' : fixedTime}`).getTime()
+      });
+    }
+  });
 
-    const summaryList = [];
-    sortedDates.forEach(([dateStr, item]) => {
-      const assignedArr = Array.isArray(item.assigned) ? item.assigned : [];
-      if (assignedArr.includes(filterStaffId)) {
-        const partners = assignedArr
-          .filter((id) => id !== filterStaffId)
-          .map((id) => getStaffName(id));
+  combinedItems.sort((a, b) => a.timestamp - b.timestamp);
 
-        summaryList.push({
-          dateStr,
-          dayNumber: item.dayNumber,
-          dayName: item.dayName,
-          formattedLabel: item.formattedLabel,
-          weekIndex: item.weekIndex,
-          partners
-        });
-      }
+  // Group berdasarkan Tanggal (DENGAN FILTER HILANGKAN YANG TERLEWAT JAUH)
+  const groupedItems = {};
+  combinedItems.forEach(item => {
+    if (item.sortDate < todayStr) return; 
+    
+    if (item.sortDate === todayStr) {
+        if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
+        groupedItems[item.sortDate].push(item);
+    } else {
+        if (item.timestamp <= nowTimestamp) return;
+        if (!groupedItems[item.sortDate]) groupedItems[item.sortDate] = [];
+        groupedItems[item.sortDate].push(item);
+    }
+  });
+  
+  const sortedDates = Object.keys(groupedItems).sort((a,b) => new Date(a) - new Date(b));
+  const todayItems = groupedItems[todayStr] || [];
+
+  const getCountdown = (targetTime) => {
+    const diff = targetTime - nowTimestamp;
+
+    if (isNaN(targetTime)) {
+      return { isExpired: true, badgeClass: 'bg-slate-900 border-slate-700 text-slate-400' };
+    }
+
+    if (diff <= 0) {
+      return {
+        isExpired: true,
+        days: 0, hours: 0, minutes: 0, seconds: 0,
+        badgeClass: 'bg-rose-950/80 border-rose-500 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.3)]'
+      };
+    }
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    let badgeClass = 'bg-slate-900 border-slate-700 shadow-lg text-slate-200';
+    if (days === 0 && hours < 24) {
+      badgeClass = 'bg-rose-950/40 border-rose-500/50 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.3)]';
+    } else if (days <= 2) {
+      badgeClass = 'bg-amber-950/40 border-amber-500/50 text-amber-200 shadow-[0_0_20px_rgba(245,158,11,0.2)]';
+    }
+
+    return {
+      isExpired: false,
+      days, hours, minutes, seconds,
+      badgeClass
+    };
+  };
+
+  // -------------------------------------------------------------
+  // LOGIKA PENENTUAN LOKASI SDM KHUSUS
+  // -------------------------------------------------------------
+  const tentukanLokasiSDM = (sdmName, todayPiketList, todayAgendaList, sdmRole = '') => {
+    if (sdmRole && sdmRole.toLowerCase().includes('ketua tim kabupaten')) {
+        return 'Di Sekretariat PKH';
+    }
+
+    const isPiket = todayPiketList.some(p => {
+        const pName = typeof p === 'object' ? p.name || p.id || p.NAMA : p;
+        return pName === sdmName;
     });
 
-    return summaryList;
-  }, [filterStaffId, sortedDates, staffList]);
+    if (isPiket) {
+        return 'Di Sekretariat PKH';
+    }
+
+    const hasAgenda = todayAgendaList.some(ag => ag.sdmName === sdmName || (ag.assigned && ag.assigned.includes(sdmName)));
+    
+    if (hasAgenda) {
+        return 'Di Lapangan atau di Desa sesuai agenda yang diinput';
+    }
+
+    return 'Di Lapangan';
+  };
+
+  // -------------------------------------------------------------
+  // AGENDA 3 HARI KERJA & AGENDA HARI INI (Filter Aktif Realtime)
+  // -------------------------------------------------------------
+  const getNext3WorkingDays = (startDate) => {
+    const dates = [];
+    let curr = new Date(startDate);
+    while (dates.length < 3) {
+      curr.setDate(curr.getDate() + 1);
+      const day = curr.getDay();
+      if (day !== 0 && day !== 6) { 
+        const yr = curr.getFullYear();
+        const mo = String(curr.getMonth() + 1).padStart(2, '0');
+        const da = String(curr.getDate()).padStart(2, '0');
+        dates.push(`${yr}-${mo}-${da}`);
+      }
+    }
+    return dates;
+  };
+
+  const next3WorkingDates = getNext3WorkingDays(nowTimestamp);
+  const upcoming3DaysAgendaList = agendas.filter((ag) => {
+    if (!ag.date) return false;
+    const cleanDate = ag.date.includes('T') ? ag.date.split('T')[0] : ag.date;
+    return next3WorkingDates.includes(cleanDate);
+  });
+
+  const activeTodayAgenda = todayAgenda.filter(ag => {
+    const { dateStr } = getLocalFormat(ag.date || '');
+    return (dateStr || todayStr) === todayStr; 
+  });
+
+  const activeUpcomingAgenda = upcoming3DaysAgendaList.filter(ag => {
+    const { dateStr, timeStr } = getLocalFormat(ag.date || '');
+    const tStr = ag.time || timeStr || '23:59';
+    const ts = new Date(`${dateStr || todayStr}T${tStr.length === 5 ? tStr + ':00' : tStr}`).getTime();
+    return ts > nowTimestamp;
+  });
+
+  // -------------------------------------------------------------
+  // HANDLERS HAPUS / EDIT LOG & PENGUMUMAN
+  // -------------------------------------------------------------
+  const handleDeleteInfo = async (infoId) => {
+    if (!isAdmin) return showToast?.('Akses khusus Admin!', 'error');
+    if (window.confirm('Hapus pengumuman ini dari dashboard?')) {
+      try {
+        await remove(ref(db, `infoList/${infoId}`));
+        showToast?.('Pengumuman berhasil dihapus!', 'info');
+      } catch (err) {
+        showToast?.('Gagal menghapus pengumuman.', 'error');
+      }
+    }
+  };
+
+  const handleDeleteNote = async (noteId) => {
+    if (!isAdmin) return showToast?.('Akses khusus Admin!', 'error');
+    if (window.confirm('Hapus catatan ini dari dashboard?')) {
+      try {
+        await remove(ref(db, `dashboardNotes/${noteId}`));
+        showToast?.('Catatan berhasil dihapus!', 'info');
+      } catch (err) {
+        showToast?.('Gagal menghapus catatan.', 'error');
+      }
+    }
+  };
+
+  const handleDeleteSingleLog = async (logId) => {
+    if (!isAdmin) return showToast?.('Akses terbatas khusus Admin!', 'error');
+    if (window.confirm('Apakah Anda yakin ingin menghapus riwayat pertukaran ini?')) {
+      try {
+        await remove(ref(db, `swaps/${logId}`));
+        showToast?.('Log pertukaran berhasil dihapus!', 'success');
+      } catch (err) {
+        showToast?.('Gagal menghapus log.', 'error');
+      }
+    }
+  };
+
+  const handleClearAllLogs = async () => {
+    if (!isAdmin) return showToast?.('Akses terbatas khusus Admin!', 'error');
+    if (window.confirm('PERHATIAN! Apakah Anda yakin ingin MENGHAPUS SELURUH riwayat pertukaran piket?')) {
+      try {
+        await remove(ref(db, 'swaps'));
+        showToast?.('Seluruh log pertukaran berhasil dibersihkan!', 'success');
+      } catch (err) {
+        showToast?.('Gagal membersihkan log.', 'error');
+      }
+    }
+  };
+
+  const handleOpenEditLog = (log) => {
+    if (!isAdmin) return showToast?.('Akses terbatas khusus Admin!', 'error');
+    setEditingLog({ ...log });
+    setEditLogModalOpen(true);
+  };
+
+  const handleSaveEditedLog = async (e) => {
+    e.preventDefault();
+    if (!editingLog || !editingLog.id) return;
+    try {
+      await update(ref(db, `swaps/${editingLog.id}`), {
+        staffA: editingLog.staffA,
+        dayNumberA: Number(editingLog.dayNumberA),
+        staffB: editingLog.staffB,
+        dayNumberB: Number(editingLog.dayNumberB)
+      });
+      showToast?.('Riwayat log berhasil diperbarui!', 'success');
+      setEditLogModalOpen(false);
+      setEditingLog(null);
+    } catch (err) {
+      showToast?.('Gagal memperbarui log.', 'error');
+    }
+  };
+
+  const validSwapLogs = swapLogs.filter(log => log && (log.staffA || log.staffB || log.dayNumberA));
+
+  const defaultNotes = [
+    "Hadir 15 menit sebelum jam kerja kantor dimulai.",
+    "Memastikan kebersihan dan kerapihan ruang pelayanan & sekretariat.",
+    "Mengisi serta mengelola Buku Register Tamu / KPM PKH.",
+    "Melayani konsultasi KPM PKH dengan ramah dan profesional.",
+    "Memastikan seluruh peralatan listrik, AC, komputer, dan pintu terkunci rapat saat jam pelayanan selesai."
+  ];
+
+  const piketNotes = (config.piketNotes && config.piketNotes.length > 0) ? config.piketNotes : defaultNotes;
+
+  const safeTodayPiket = realtimePiket !== null 
+    ? realtimePiket 
+    : (Array.isArray(todayPiket) ? todayPiket : (todayPiket ? Object.values(todayPiket) : []));
 
   return (
-    <div className="space-y-5 animate-fadeIn max-w-full">
-      {/* HEADER BAR & CONTROL PANEL MOBILE-FIRST PRESISI */}
-      <div className="flex justify-between items-center flex-wrap gap-3 sm:gap-4">
-        <div>
-          <h2 className="text-base sm:text-2xl font-black text-white flex items-center gap-2">
-            <FontAwesomeIcon icon={faCalendarAlt} className="text-indigo-400 text-sm sm:text-xl" />
-            <span>Jadwal Piket Bulanan</span>
-          </h2>
-          <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">
-            {isPublic 
-              ? 'Mode Publik: Hanya untuk melihat jadwal.' 
-              : 'Klik nama petugas untuk mengajukan tukar atau mengelola piket'}
+    <div className="space-y-6 sm:space-y-8 animate-fadeIn max-w-full pb-10 overflow-hidden">
+      
+      {/* HEADER WIDGET JAM DIGITAL 3D */}
+      <div className="p-4 sm:p-8 rounded-3xl bg-gradient-to-r from-indigo-950/90 via-slate-900/95 to-purple-950/90 border border-indigo-500/40 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col md:flex-row justify-between items-start md:items-center gap-5 relative overflow-hidden transition-all duration-300 hover:border-indigo-400/60">
+        <div className="absolute -top-12 -left-12 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div className="z-10 space-y-1.5 max-w-full">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-[10px] font-extrabold uppercase tracking-widest flex items-center gap-1.5">
+              <FontAwesomeIcon icon={faShieldAlt} /> SDM PKH TAPIN
+            </span>
+            {isAdmin && (
+              <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider">
+                Mode Admin Full Akses
+              </span>
+            )}
+          </div>
+          <h1 className="text-xl sm:text-3xl font-extrabold text-white tracking-wide drop-shadow-md flex items-center gap-2.5 leading-snug">
+            <span>Sistem Informasi SDM PKH Tapin</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-indigo-200/80 leading-tight">
+            Monitoring Piket, Agenda, & Deadline Tugas Terpadu
           </p>
         </div>
 
-        {/* TOOLBAR BUTTONS RESPONSIVE GRID/FLEX */}
-        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
-          {/* Selector Tampilan Bulan & Tahun Kalender */}
-          <div className="col-span-2 sm:col-span-1 flex items-center bg-slate-900 border border-white/10 rounded-xl px-3 py-2 gap-2 shadow-md justify-center">
-            <select
-              value={viewMonth}
-              onChange={(e) => setViewMonth(Number(e.target.value))}
-              className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer"
-            >
-              {namaBulan.map((bln, i) => (
-                <option key={i + 1} value={i + 1} className="bg-slate-900 text-white">{bln}</option>
-              ))}
-            </select>
-            <select
-              value={viewYear}
-              onChange={(e) => setViewYear(Number(e.target.value))}
-              className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer"
-            >
-              {[2025, 2026, 2027, 2028, 2029, 2030].map((yr) => (
-                <option key={yr} value={yr} className="bg-slate-900 text-white">{yr}</option>
-              ))}
-            </select>
+        <div className="z-10 flex items-center gap-3 flex-wrap w-full md:w-auto">
+          <div className="p-3.5 sm:p-5 rounded-2xl bg-slate-950/80 border border-indigo-500/40 backdrop-blur-2xl shadow-[0_10px_30px_rgba(99,102,241,0.25)] flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 hover:border-cyan-400/60 transition-all duration-300 w-full sm:w-auto">
+            <div className="flex flex-col items-start justify-center px-3 py-1.5 bg-indigo-600/20 rounded-xl border border-indigo-400/30 w-full sm:w-auto">
+              <span className="text-xs sm:text-sm font-extrabold text-white tracking-wide flex items-center gap-1.5">
+                <FontAwesomeIcon icon={faCalendarAlt} className="text-cyan-400" />
+                <span>{fullFormattedDate}</span>
+              </span>
+            </div>
+
+            <div className="hidden sm:block w-px h-10 bg-white/10"></div>
+
+            <div className="flex flex-col justify-center">
+              <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-400 font-bold mb-0.5">
+                <FontAwesomeIcon icon={faClock} className="text-cyan-400 animate-pulse" />
+                <span>WAKTU REAL-TIME</span>
+              </div>
+              <div className="font-mono text-xl sm:text-3xl font-black text-white tracking-wider flex items-center drop-shadow-[0_0_12px_rgba(34,211,238,0.6)]">
+                <span>{hoursStr}:{minutesStr}</span>
+                <span className="text-cyan-400 text-base sm:text-2xl font-extrabold animate-pulse ml-1">: {secondsStr} WITA</span>
+              </div>
+            </div>
           </div>
 
-          {/* SUB-MENU ABSEN PIKET (FITUR BARU) */}
           <button
-            onClick={() => setAbsenSubMenuOpen(true)}
-            className="px-3 py-2 rounded-xl bg-teal-600/80 hover:bg-teal-500 border border-teal-500/50 text-white font-extrabold text-[11px] sm:text-xs shadow-md flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+            onClick={() => setIsNotesModalOpen(true)}
+            className="w-full sm:w-auto px-4 py-3 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-300 hover:bg-amber-500/35 font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer shadow-lg shadow-amber-500/10 active:scale-95"
           >
-            <FontAwesomeIcon icon={faClipboardCheck} />
-            <span>Absen Piket</span>
+            <FontAwesomeIcon icon={faClipboardList} />
+            <span>Petunjuk Piket</span>
           </button>
+        </div>
+      </div>
 
-          {/* SUB-MENU FILTER JADWAL SDM */}
-          <button
-            onClick={() => setSdmFilterSubMenuOpen(true)}
-            className={`px-3 py-2 rounded-xl font-extrabold text-[11px] sm:text-xs shadow-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              filterStaffId 
-                ? 'bg-emerald-600 text-white shadow-emerald-900/50 animate-pulse' 
-                : 'bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-900'
-            }`}
-          >
-            <FontAwesomeIcon icon={faFilter} />
-            <span className="truncate">{filterStaffId ? `Filter: ${getStaffName(filterStaffId).split(' ')[0]}` : 'Filter SDM'}</span>
-          </button>
+      {/* TABEL RINCIAN KEGIATAN HARI INI DENGAN KOLOM MATERI & LOKASI DESA/KECAMATAN TERPISAH */}
+      <div className="space-y-4 sm:space-y-6 pt-2 relative z-10 w-full">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white border-b border-white/10 pb-3">
+          <div className="flex items-center gap-3">
+            <FontAwesomeIcon icon={faListAlt} className="text-xl sm:text-2xl text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]" />
+            <h2 className="text-lg sm:text-2xl font-black tracking-wide uppercase drop-shadow-lg text-transparent bg-clip-text bg-gradient-to-r from-emerald-100 to-emerald-400">
+              Rincian Kegiatan & Lokasi SDM Hari Ini
+            </h2>
+          </div>
+          <span className="text-xs font-bold text-emerald-300 bg-emerald-900/50 px-3 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 w-fit shadow-inner">
+            <FontAwesomeIcon icon={faCalendarCheck} />
+            Total: {todayItems.length} Aktivitas Aktif
+          </span>
+        </div>
 
-          {/* Export PDF */}
-          <button
-            onClick={handleExportPDF}
-            className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] sm:text-xs shadow-3d-button flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-          >
-            <FontAwesomeIcon icon={faFilePdf} />
-            <span>Export PDF</span>
-          </button>
+        <div className="rounded-[24px] bg-slate-900/80 border border-emerald-500/30 backdrop-blur-xl shadow-2xl overflow-hidden group hover:border-emerald-500/60 transition-all duration-300 w-full">
+          <div className="overflow-x-auto custom-scrollbar w-full">
+            <table className="w-full text-left border-collapse min-w-[950px]">
+              <thead>
+                <tr className="bg-slate-950/90 text-slate-300 text-[10px] sm:text-xs uppercase tracking-widest border-b border-white/10">
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Judul Kegiatan</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Lokasi (Desa & Kec.)</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Materi / P2K2</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Status Lokasi SDM Terkait</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Kategori & Supervisi</th>
+                  <th className="p-4 sm:p-5 font-extrabold whitespace-nowrap">Waktu & Hitung Mundur</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 text-xs sm:text-sm text-slate-200">
+                {todayItems.length > 0 ? (
+                  todayItems.map((item, idx) => {
+                    const countdown = getCountdown(item.timestamp);
+                    const isTask = item.itemType === 'task';
+                    
+                    const targetSdmName = isTask ? getTargetText(item) : (item.sdmName || 'Seluruh SDM');
+                    const staffData = staffList.find(s => (typeof s === 'object' && (s.name === targetSdmName || s.NAMA === targetSdmName || s.id === targetSdmName)));
+                    const sdmRole = staffData ? staffData.jabatan : ''; 
+                    const statusLokasi = tentukanLokasiSDM(targetSdmName, safeTodayPiket, activeTodayAgenda, sdmRole);
 
-          {/* SUB-MENU LOG TUKAR PIKET (ADMIN) */}
-          {isAdmin && (
-            <button
-              onClick={() => setLogsSubMenuOpen(true)}
-              className="px-3 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-white font-extrabold text-[11px] sm:text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-            >
-              <FontAwesomeIcon icon={faHistory} />
-              <span>Log ({swapLogs.length})</span>
-            </button>
-          )}
+                    return (
+                      <tr key={idx} className="hover:bg-white/5 transition-colors duration-200 group/row align-top">
+                        <td className="p-4 sm:p-5 font-bold break-words min-w-[200px]">
+                          <span className={isTask ? "text-rose-100 group-hover/row:text-rose-300" : "text-cyan-100 group-hover/row:text-cyan-300"}>
+                            {item.title}
+                          </span>
+                          <div className="mt-1 text-[10px] text-slate-400 font-normal">
+                             Target: {targetSdmName}
+                          </div>
+                        </td>
 
-          {/* Lock/Unlock Schedule (Admin) */}
-          {isAdmin && (
-            <button
-              onClick={handleToggleLockSchedule}
-              className={`px-3 py-2 rounded-xl font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                isScheduleLocked
-                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/10'
-              }`}
-            >
-              <FontAwesomeIcon icon={isScheduleLocked ? faLock : faUnlock} />
-              <span>{isScheduleLocked ? 'Terkunci' : 'Kunci'}</span>
-            </button>
-          )}
+                        {/* KOLOM LOKASI: DESA & KECAMATAN */}
+                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+                          {isTask ? (
+                            <span className="text-slate-500 italic text-xs">Kantor / Online</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5 text-slate-200 text-xs font-semibold">
+                              <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400 shrink-0" />
+                              <span>Desa {item.desa || '-'}, Kec. {item.kecamatan || '-'}</span>
+                            </div>
+                          )}
+                        </td>
 
-          {/* Reset Schedule (Admin) */}
-          {isAdmin && (
-            <button
-              onClick={handleResetMonthlySchedule}
-              className="px-3 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-300 font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md"
-              title="Reset Seluruh Jadwal Piket Bulan Ini"
-            >
-              <FontAwesomeIcon icon={faTrashAlt} />
-              <span>Reset</span>
-            </button>
-          )}
+                        {/* KOLOM MATERI / P2K2 */}
+                        <td className="p-4 sm:p-5 align-middle min-w-[180px]">
+                          {!isTask && item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 ? (
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-amber-500/20 space-y-0.5">
+                              <div className="text-[11px] font-bold text-amber-400">{item.modulP2K2}</div>
+                              <div className="text-[10px] text-slate-300 leading-snug">{item.sesiP2K2}</div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic text-xs">-</span>
+                          )}
+                        </td>
 
-          {/* Acak Piket (Admin) */}
-          {isAdmin && (
-            <button
-              onClick={() => setGenModalOpen(true)}
-              className={`col-span-2 sm:col-span-1 px-4 py-2 rounded-xl font-bold text-xs shadow-3d-button flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                isScheduleLocked ? 'bg-indigo-900/50 text-slate-400 border border-white/10' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-              }`}
-            >
-              <FontAwesomeIcon icon={faSync} />
-              <span>Acak Piket</span>
-            </button>
+                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-bold text-[10px] shadow-sm
+                             ${statusLokasi === 'Di Sekretariat PKH' ? 'bg-indigo-900/50 border-indigo-500/50 text-indigo-300' : 
+                               statusLokasi.includes('Di Lapangan') ? 'bg-emerald-900/50 border-emerald-500/50 text-emerald-300' : 
+                               'bg-slate-800 border-slate-600 text-slate-300'}`}>
+                             <FontAwesomeIcon icon={faMapPin} className={statusLokasi.includes('Sekretariat') ? "text-indigo-400" : "text-emerald-400"} />
+                             {statusLokasi}
+                          </span>
+                        </td>
+
+                        {/* KOLOM KATEGORI & KETERANGAN SUPERVISI */}
+                        <td className="p-4 sm:p-5 align-middle space-y-2">
+                          {isTask ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest border border-rose-500/30 uppercase">
+                              <FontAwesomeIcon icon={faTasks} /> Deadline
+                            </span>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest border border-cyan-500/30 uppercase">
+                                <FontAwesomeIcon icon={faCalendarCheck} /> Agenda
+                              </span>
+                              {item.isSupervisiKatim && (
+                                <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold shadow-sm w-fit">
+                                  <FontAwesomeIcon icon={faUserShield} /> Disupervisi Katim
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="p-4 sm:p-5 whitespace-nowrap align-middle">
+                           <div className="flex flex-col gap-2">
+                             <span className="bg-slate-950/80 px-2 py-1 rounded border border-white/10 text-amber-300 shadow-inner flex items-center gap-1.5 w-fit font-mono font-bold text-xs">
+                               <FontAwesomeIcon icon={faClock} className={isTask ? "text-rose-400" : "text-cyan-400"} />
+                               {item.sortTime} WITA
+                             </span>
+                             {countdown.isExpired ? (
+                               <span className="text-rose-400 font-black text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5">
+                                 <FontAwesomeIcon icon={faTimes} /> Terlewati
+                               </span>
+                             ) : (
+                               <div className="font-mono font-bold text-emerald-300 text-[10px] flex items-center gap-1 bg-slate-950/60 px-2 py-1 rounded-md w-fit border border-emerald-500/20">
+                                 <span className="relative flex h-1.5 w-1.5 mr-0.5">
+                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                 </span>
+                                 {countdown.days > 0 && <span className="text-emerald-100">{countdown.days}h</span>}
+                                 <span>{String(countdown.hours).padStart(2,'0')}j</span>
+                                 <span>{String(countdown.minutes).padStart(2,'0')}m</span>
+                                 <span className="text-cyan-300 animate-pulse">{String(countdown.seconds).padStart(2,'0')}d</span>
+                               </div>
+                             )}
+                           </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="p-10 text-center text-slate-400 italic text-xs sm:text-sm bg-slate-900/30">
+                      <FontAwesomeIcon icon={faCheckCircle} className="text-3xl text-slate-600 mb-3 block mx-auto" />
+                      Semua agenda atau tugas untuk hari ini sudah selesai/terlewati.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION UTAMA: JADWAL & DEADLINE TERPADU (GROUPED BY DATE) */}
+      <div className="space-y-5 sm:space-y-6 relative mt-10 w-full">
+        <div className="absolute -inset-1 bg-gradient-to-r from-rose-500/10 via-indigo-500/10 to-cyan-500/10 rounded-3xl blur-xl pointer-events-none"></div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white relative z-10 px-2 border-b border-white/10 pb-4">
+          <div className="flex items-center gap-3">
+            <FontAwesomeIcon icon={faTasks} className="text-2xl sm:text-3xl text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.6)]" />
+            <h2 className="text-xl sm:text-3xl font-black tracking-wide drop-shadow-lg uppercase text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">
+              Jadwal Kegiatan & Deadline Tugas Aktif
+            </h2>
+          </div>
+          <span className="text-xs font-bold text-slate-400 bg-slate-900/50 px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 w-fit shrink-0">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+            </span>
+            Live Monitoring
+          </span>
+        </div>
+
+        <div className="space-y-8 relative z-10 w-full">
+          {sortedDates.length > 0 ? (
+            sortedDates.map(dateStr => {
+              const items = groupedItems[dateStr];
+              const isToday = dateStr === todayStr;
+
+              return (
+                <div key={dateStr} className={`p-1 rounded-[28px] bg-gradient-to-br from-slate-800/90 to-slate-900/95 shadow-2xl overflow-hidden transition-all duration-300 relative group/card border w-full ${isToday ? 'border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'border-slate-600/40 hover:border-slate-500/80'}`}>
+                  
+                  {isToday && <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none animate-pulse-slow"></div>}
+
+                  <div className="p-4 sm:p-6 bg-slate-950/70 rounded-[24px] backdrop-blur-xl w-full">
+                    {/* --- HEADER TANGGAL CARD --- */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-700/60">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 ${isToday ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40' : 'bg-slate-800 text-slate-400 border-slate-600'}`}>
+                          <FontAwesomeIcon icon={faCalendarAlt} className="text-2xl sm:text-3xl" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className={`text-lg sm:text-2xl font-black uppercase tracking-wide drop-shadow-md truncate ${isToday ? 'text-indigo-200' : 'text-slate-100'}`}>
+                            {formatIndoDate(dateStr)}
+                            {isToday && <span className="ml-2 text-[10px] sm:text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-widest align-middle">Hari Ini</span>}
+                          </h3>
+                          <p className="text-xs text-slate-400 font-medium mt-1 truncate">Total {items.length} aktivitas aktif pada tanggal ini.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* --- ISI LIST KARTU --- */}
+                    <div className="space-y-4 sm:space-y-5 w-full">
+                      {items.map((item, idx) => {
+                        if (item.itemType === 'task') {
+                          const countdown = getCountdown(item.timestamp);
+                          return (
+                            <div key={idx} className="flex flex-col lg:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-rose-950/30 to-slate-900/60 border-l-[8px] border-l-rose-500 border-y border-r border-rose-500/20 hover:from-rose-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch w-full">
+                              
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3 min-w-0">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-rose-500/20 text-rose-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.3)] shrink-0">
+                                      <FontAwesomeIcon icon={faExclamationCircle} className="mr-1.5" /> DEADLINE TUGAS
+                                    </span>
+                                  </div>
+                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-rose-100 to-rose-300 uppercase tracking-wide leading-snug drop-shadow-md break-words">
+                                    {item.title}
+                                  </h4>
+                                </div>
+                                
+                                <div className="flex flex-wrap gap-2.5 text-xs">
+                                  <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faUser} className="text-slate-400"/>
+                                    {getTargetText(item)}
+                                  </span>
+                                  <span className="text-rose-200 font-bold bg-rose-950/60 px-3 py-1.5 rounded-lg border border-rose-500/30 shadow-sm flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faClock} className="text-rose-400"/>
+                                    Batas: {item.sortTime} WITA
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="lg:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-5">
+                                 <div className="flex items-center gap-2 mb-2">
+                                    <div className="relative flex h-2.5 w-2.5">
+                                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${countdown.isExpired ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
+                                      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${countdown.isExpired ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
+                                    </div>
+                                    <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300">
+                                      {countdown.isExpired ? 'STATUS: TERLEWATI' : 'SISA WAKTU DEADLINE'}
+                                    </span>
+                                 </div>
+                                 <div className={`p-3 sm:p-4 rounded-xl border flex flex-col items-center justify-center w-full min-w-[200px] shadow-inner backdrop-blur-md ${countdown.badgeClass}`}>
+                                   {countdown.isExpired ? (
+                                     <div className="flex items-center gap-2 animate-pulse text-rose-400">
+                                        <FontAwesomeIcon icon={faTimes} className="text-xl" />
+                                        <span className="font-black text-lg sm:text-xl uppercase tracking-widest">WAKTU HABIS</span>
+                                     </div>
+                                   ) : (
+                                     <div className="flex gap-2 text-white">
+                                       {countdown.days > 0 && (
+                                          <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                            <span className="text-rose-300 font-mono font-black text-lg sm:text-2xl leading-none">{countdown.days}</span>
+                                            <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Hari</span>
+                                          </div>
+                                       )}
+                                       <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                         <span className="text-amber-300 font-mono font-black text-lg sm:text-2xl leading-none">{String(countdown.hours).padStart(2, '0')}</span>
+                                         <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Jam</span>
+                                       </div>
+                                       <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                         <span className="text-emerald-300 font-mono font-black text-lg sm:text-2xl leading-none">{String(countdown.minutes).padStart(2, '0')}</span>
+                                         <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Mnt</span>
+                                       </div>
+                                       <div className="flex flex-col items-center bg-slate-950/80 px-2 sm:px-3 py-1.5 rounded-lg border border-white/10 shadow min-w-[3rem]">
+                                         <span className="text-cyan-300 font-mono font-black text-lg sm:text-2xl leading-none animate-pulse">{String(countdown.seconds).padStart(2, '0')}</span>
+                                         <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-1 uppercase">Dtk</span>
+                                       </div>
+                                     </div>
+                                   )}
+                                 </div>
+                              </div>
+                            </div>
+                          )
+                        } else {
+                          return (
+                            <div key={idx} className="flex flex-col lg:flex-row p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/30 to-slate-900/60 border-l-[8px] border-l-cyan-500 border-y border-r border-cyan-500/20 hover:from-cyan-950/50 transition-all duration-300 shadow-lg relative overflow-hidden gap-5 items-stretch w-full">
+                              
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+                              <div className="flex-1 flex flex-col justify-between z-10 space-y-3 min-w-0">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="inline-flex items-center justify-center px-2.5 py-1 bg-cyan-500/20 text-cyan-300 text-[10px] font-black tracking-widest rounded-md uppercase border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.3)] shrink-0">
+                                      <FontAwesomeIcon icon={faCheckCircle} className="mr-1.5" /> AGENDA KEGIATAN
+                                    </span>
+                                  </div>
+                                  <h4 className="text-lg sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-cyan-100 to-cyan-300 uppercase tracking-wide leading-snug drop-shadow-md break-words">
+                                    {item.title}
+                                  </h4>
+                                </div>
+                                
+                                <div className="flex flex-wrap gap-2.5 text-xs">
+                                  <span className="text-slate-200 font-bold bg-slate-900/80 px-3 py-1.5 rounded-lg border border-white/10 shadow-sm flex items-center gap-2">
+                                    <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-400"/>
+                                    Desa {item.desa || '-'}, Kec. {item.kecamatan || '-'}
+                                  </span>
+                                  {item.sdmName && (
+                                    <span className="text-emerald-200 font-bold bg-emerald-950/60 px-3 py-1.5 rounded-lg border border-emerald-500/30 shadow-sm flex items-center gap-2">
+                                      <FontAwesomeIcon icon={faUser} className="text-emerald-400"/>
+                                      {item.sdmName}
+                                    </span>
+                                  )}
+                                  {item.category && item.category.toUpperCase().includes('P2K2') && item.modulP2K2 && (
+                                    <span className="text-amber-200 font-bold bg-amber-950/60 px-3 py-1.5 rounded-lg border border-amber-500/30 shadow-sm flex items-center gap-2">
+                                      <FontAwesomeIcon icon={faStickyNote} className="text-amber-400"/>
+                                      {item.modulP2K2} - {item.sesiP2K2}
+                                    </span>
+                                  )}
+                                  {item.isSupervisiKatim && (
+                                    <span className="text-amber-300 font-bold bg-amber-500/20 px-3 py-1.5 rounded-lg border border-amber-500/40 shadow-sm flex items-center gap-2">
+                                      <FontAwesomeIcon icon={faUserShield} className="text-amber-400"/>
+                                      Disupervisi Katim
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="lg:w-auto w-full flex flex-col items-center justify-center z-10 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-5">
+                                 <div className="flex items-center gap-2 mb-2">
+                                    <FontAwesomeIcon icon={faCalendarCheck} className="text-cyan-400 text-sm" />
+                                    <span className="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300">
+                                      JADWAL PELAKSANAAN
+                                    </span>
+                                 </div>
+                                 <div className="bg-slate-900/90 border-2 border-cyan-500/40 px-5 sm:px-6 py-3 rounded-xl flex flex-col items-center justify-center w-full min-w-[200px] shadow-[0_0_15px_rgba(6,182,212,0.15)] backdrop-blur-md">
+                                    <div className="font-mono font-black text-2xl sm:text-3xl flex items-center gap-2 text-white">
+                                      <FontAwesomeIcon icon={faClock} className="animate-pulse text-cyan-400 text-xl" />
+                                      <span>{item.sortTime}</span>
+                                    </div>
+                                    <div className="mt-1 text-[11px] font-bold text-cyan-400 tracking-widest bg-cyan-950/50 px-3 py-0.5 rounded-full">
+                                      WITA
+                                    </div>
+                                 </div>
+                              </div>
+
+                            </div>
+                          )
+                        }
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )
+            })
+          ) : (
+            <div className="text-center py-16 text-slate-400 italic text-sm border-2 border-dashed border-slate-600/50 rounded-[32px] bg-slate-900/30 shadow-inner w-full">
+              <div className="mb-3">
+                <FontAwesomeIcon icon={faCalendarAlt} className="text-4xl text-slate-600" />
+              </div>
+              Semua tugas atau agenda penting saat ini sudah selesai/terlewati.
+            </div>
           )}
         </div>
       </div>
 
-      {/* BANNER INDICATOR FILTER SDM DITAMPILKAN JIKA AKTIF */}
-      {filterStaffId && (
-        <div className="p-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/50 flex justify-between items-center gap-3 backdrop-blur-xl">
-          <div className="flex items-center gap-2 text-emerald-300 text-xs font-bold truncate">
-            <FontAwesomeIcon icon={faUser} />
-            <span className="truncate">
-              Disaring: <strong className="text-white uppercase">{getStaffName(filterStaffId)}</strong> ({selectedStaffScheduleSummary.length} Hari Tugas)
+      {/* DUAL SECTION: PAPAN PENGUMUMAN & PAPAN CATATAN SDM */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 pt-6 border-t border-white/10 mt-6">
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-amber-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-amber-400">
+              <FontAwesomeIcon icon={faBullhorn} className="text-lg sm:text-xl" />
+              <h2 className="text-sm sm:text-lg font-bold text-white">Papan Pengumuman SDM</h2>
+            </div>
+            <span className="text-[10px] font-bold text-amber-300 bg-amber-950/80 px-2.5 py-1 rounded-full border border-amber-500/30">
+              {infoList.length} Pengumuman
             </span>
           </div>
-          <button
-            onClick={() => setFilterStaffId('')}
-            className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold cursor-pointer shrink-0"
-          >
-            Bersihkan
-          </button>
-        </div>
-      )}
 
-      {/* KALENDER TAMPILAN JADWAL PIKET */}
-      <div className="space-y-5">
-        {Object.keys(weeksMap).length > 0 ? (
-          Object.entries(weeksMap).map(([weekNum, daysInWeek]) => (
-            <div key={weekNum} className="p-3.5 sm:p-6 rounded-3xl bg-slate-900/60 border border-white/10 backdrop-blur-xl shadow-3d-glass">
-              <h3 className="text-xs sm:text-sm font-extrabold text-indigo-300 uppercase tracking-wider mb-3">
-                MINGGU KE-{weekNum}
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-                {weekDaysHeader.map((dayName) => {
-                  const dayData = daysInWeek[dayName];
-                  if (!dayData) {
-                    return (
-                      <div key={dayName} className="p-3 rounded-2xl bg-slate-950/40 border border-white/5 opacity-40 hidden md:block">
-                        <span className="text-xs font-bold text-slate-500">{dayName}</span>
-                        <p className="text-[10px] text-slate-600 mt-2 italic">Luar Hari Kerja</p>
-                      </div>
-                    );
-                  }
-
-                  const assignedList = Array.isArray(dayData.assigned) ? dayData.assigned : [];
-                  const swappedMap = dayData.swappedInfo || {};
-                  
-                  // DETEKSI APAKAH KOTAK INI ADALAH HARI INI
-                  const isToday = dayData.dateStr === todayStr;
-
-                  return (
-                    <div
-                      key={dayData.dateStr}
-                      className={`relative p-3 sm:p-4 rounded-2xl border backdrop-blur-md transition-all ${
-                        isToday 
-                          ? 'bg-slate-800/80 border-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.3)] ring-1 ring-cyan-400' 
-                          : dayData.isHoliday
-                          ? 'bg-rose-950/80 border-rose-500/80 text-rose-200 shadow-[0_0_15px_rgba(244,63,94,0.2)]'
-                          : 'bg-white/5 border-white/10 hover:border-indigo-500/40'
-                      }`}
-                    >
-                      {/* EFEK CAHAYA & BADGE "HARI INI" */}
-                      {isToday && (
-                        <>
-                          <div className="absolute inset-0 bg-cyan-400/5 rounded-2xl animate-pulse pointer-events-none"></div>
-                          <div className="absolute -top-3 -right-2 bg-cyan-500 text-slate-950 text-[9px] font-black px-2 py-0.5 rounded-full shadow-[0_0_10px_#22d3ee] z-10 border border-cyan-300">
-                            HARI INI
-                          </div>
-                        </>
-                      )}
-
-                      <div className="text-center pb-2 border-b border-white/10 mb-2.5 relative z-10">
-                        <span className={`text-[10px] sm:text-[11px] font-bold block uppercase ${isToday ? 'text-cyan-300' : 'text-slate-300'}`}>{dayName}</span>
-                        <span className={`text-xs font-black mt-0.5 inline-block px-3 py-0.5 rounded-full ${
-                          dayData.isHoliday 
-                            ? 'bg-rose-600 text-white shadow-md' 
-                            : isToday
-                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50'
-                            : 'bg-indigo-950/80 text-cyan-300 border border-cyan-500/30'
-                        }`}>
-                          Tanggal {dayData.dayNumber}
-                        </span>
-                      </div>
-
-                      <div className="space-y-2 relative z-10">
-                        {!dayData.isHoliday ? (
-                          <>
-                            {/* DAFTAR NAMA PETUGAS YANG SUDAH ADA */}
-                            {assignedList.length > 0 ? (
-                              assignedList.map((staffId) => {
-                                const isSwapped = !!swappedMap[staffId];
-                                const swapMeta = swappedMap[staffId];
-
-                                const pendingReq = pendingRequests.find(
-                                  (r) => (r.staffA === staffId && r.dateA === dayData.dateStr) || (r.staffB === staffId && r.dateB === dayData.dateStr)
-                                );
-
-                                const isStaffA = pendingReq?.staffA === staffId;
-                                const partnerStaffId = pendingReq ? (isStaffA ? pendingReq.staffB : pendingReq.staffA) : '';
-                                const partnerDayNum = pendingReq ? (isStaffA ? pendingReq.dayNumberB : pendingReq.dayNumberA) : '';
-
-                                const showSwapHighlight = !isAdmin && isSwapped;
-                                const isFilteredSdm = filterStaffId && filterStaffId === staffId;
-
-                                // CEK STATUS ABSEN JIKA ADA
-                                const staffAtt = attendanceData[dayData.dateStr]?.[staffId]?.status;
-
-                                return (
-                                  <button
-                                    key={staffId}
-                                    onClick={() => handleCardClick(dayData.dateStr, staffId)}
-                                    className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col justify-center min-h-[44px] group ${isPublic ? 'cursor-default' : 'cursor-pointer'} ${
-                                      isFilteredSdm
-                                        ? 'bg-emerald-600/40 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] ring-2 ring-emerald-400'
-                                        : pendingReq
-                                        ? 'bg-amber-950/80 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.3)] animate-pulse'
-                                        : showSwapHighlight
-                                        ? 'bg-orange-950/80 border-orange-500/70 shadow-[0_0_10px_rgba(249,115,22,0.2)]'
-                                        : isToday
-                                        ? `bg-cyan-950/40 border-cyan-500/30 ${isPublic ? '' : 'hover:bg-cyan-900/60'}`
-                                        : `bg-slate-950/80 border-white/10 ${isPublic ? '' : 'hover:bg-indigo-600/30'}`
-                                    }`}
-                                  >
-                                    <div className="flex justify-between items-center w-full gap-1.5">
-                                      <span className={`text-[11px] font-bold tracking-wide break-words leading-tight uppercase block flex-1 ${
-                                        isFilteredSdm ? 'text-emerald-200 font-extrabold' : 'text-white'
-                                      }`}>
-                                        {getStaffName(staffId)}
-                                      </span>
-                                      <FontAwesomeIcon icon={faExchangeAlt} className={`text-[10px] text-amber-400 shrink-0 opacity-80 sm:opacity-0 ${isPublic ? 'hidden' : 'group-hover:opacity-100'} transition-opacity`} />
-                                    </div>
-
-                                    {/* BADGE ABSENSI */}
-                                    {staffAtt && (
-                                      <div className="mt-1 flex">
-                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
-                                          staffAtt === 'Hadir' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                                        }`}>
-                                          ✓ {staffAtt}
-                                        </span>
-                                      </div>
-                                    )}
-
-                                    {/* KETERANGAN MENUNGGU TUKAR */}
-                                    {pendingReq && (
-                                      <div className="mt-1 space-y-0.5">
-                                        <span className="text-[9px] font-bold text-amber-300 block leading-tight break-words">
-                                          ⇄ Usulan Tukar dgn {getStaffName(partnerStaffId)} tgl {partnerDayNum}
-                                        </span>
-                                        <span className="text-[9px] font-extrabold text-amber-400 flex items-center gap-1">
-                                          <FontAwesomeIcon icon={faHourglassHalf} className="animate-spin text-[8px]" />
-                                          <span>{renderCountdown(pendingReq.timestamp)}</span>
-                                        </span>
-                                      </div>
-                                    )}
-
-                                    {/* TANDA ORANGE BERTUKAR */}
-                                    {!isAdmin && !pendingReq && isSwapped && (
-                                      <span className="text-[9px] font-bold text-orange-300 bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-400/40 inline-block mt-1 break-words leading-tight">
-                                        🔄 Tukar dgn {getStaffName(swapMeta.original)} tgl {swapMeta.swappedDateNum || swapMeta.originalDateNum}
-                                      </span>
-                                    )}
-                                  </button>
-                                );
-                              })
-                            ) : (
-                              <p className="text-[10px] text-slate-500 italic py-2 text-center">Belum ada petugas</p>
-                            )}
-                            
-                            {/* TOMBOL TAMBAH PETUGAS KHUSUS ADMIN (TIDAK MUNCUL JIKA DIKUNCI) */}
-                            {isAdmin && !isScheduleLocked && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenAddModal(dayData.dateStr);
-                                }}
-                                className="mt-2 w-full py-1.5 rounded-xl border border-dashed border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-400 text-[10px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm relative z-20"
-                                title="Tambah Petugas Baru Secara Manual ke Tanggal Ini"
-                              >
-                                <FontAwesomeIcon icon={faPlus} className="text-[9px]" />
-                                <span>Tambah Petugas</span>
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          <div className="text-center py-2">
-                            <span className="text-xs font-black text-rose-200 block uppercase tracking-wider leading-tight">
-                              {dayData.holidayTitle || 'TANGGAL MERAH'}
-                            </span>
-                            <span className="text-[9px] text-rose-300/80 block mt-1 font-semibold">HARI LIBUR RESMI</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="p-8 sm:p-12 text-center rounded-3xl bg-slate-900/60 border border-white/10 text-slate-400 space-y-3">
-            <p className="text-xs sm:text-sm">Belum ada jadwal piket untuk bulan <strong className="text-white">{namaBulan[viewMonth - 1]} {viewYear}</strong>.</p>
-            {isAdmin && (
-              <button
-                onClick={() => setGenModalOpen(true)}
-                className="px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer transition-all"
-              >
-                <FontAwesomeIcon icon={faSync} />
-                <span>Acak Piket Bulan Ini Sekarang</span>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* --- SUB-MENU MODAL 1: FILTER JADWAL PER SDM (LAMA) --- */}
-      {sdmFilterSubMenuOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-lg p-5 sm:p-7 rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl relative space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button 
-              onClick={() => setSdmFilterSubMenuOpen(false)} 
-              className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"
-            >
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2.5">
-              <FontAwesomeIcon icon={faCalendarCheck} className="text-indigo-400" />
-              <span>Cari / Filter Jadwal Piket SDM</span>
-            </h3>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-2">
-                Pilih Nama SDM / Petugas ({staffList.length} Orang Terdaftar):
-              </label>
-              <select
-                value={filterStaffId}
-                onChange={(e) => setFilterStaffId(e.target.value)}
-                className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-indigo-500/40 text-white text-xs font-bold outline-none focus:border-indigo-400 cursor-pointer"
-              >
-                <option value="">-- Pilih SDM untuk Melihat Rangkuman Jadwal --</option>
-                {staffList.map((s, idx) => {
-                  const sName = s.name || s.NAMA || s.nama || s.id;
-                  const sId = s.id || s.key || idx;
-                  return (
-                    <option key={sId} value={sId}>
-                      {sName}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            {/* RANGKUMAN TANGGAL PIKET SDM TERPILIH */}
-            {filterStaffId ? (
-              <div className="space-y-3 pt-2 border-t border-white/10">
-                <h4 className="text-xs font-bold text-indigo-300 flex items-center justify-between">
-                  <span>Rangkuman Piket {namaBulan[viewMonth - 1]} {viewYear}:</span>
-                  <span className="bg-indigo-600/40 border border-indigo-400/30 text-white px-2.5 py-0.5 rounded-full text-[10px]">
-                    {selectedStaffScheduleSummary.length} Hari Tugas
-                  </span>
-                </h4>
-
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
-                  {selectedStaffScheduleSummary.length > 0 ? (
-                    selectedStaffScheduleSummary.map((item, idx) => (
-                      <div key={idx} className="p-3 rounded-2xl bg-slate-950 border border-indigo-500/20 text-xs space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className="font-extrabold text-emerald-400">
-                            {item.dayName}, {item.dayNumber} {namaBulan[viewMonth - 1]} {viewYear}
-                          </span>
-                          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-lg">
-                            Minggu ke-{item.weekIndex}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-300">
-                          Rekan Pasangan: <strong className="text-white">{item.partners.length > 0 ? item.partners.join(', ') : 'Piket Sendiri'}</strong>
-                        </p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-center text-xs text-slate-500 py-6 italic border border-dashed border-white/10 rounded-2xl">
-                      {getStaffName(filterStaffId)} tidak memiliki jadwal piket pada bulan {namaBulan[viewMonth - 1]} {viewYear}.
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/5 text-center text-xs text-slate-400">
-                Pilih nama petugas di atas untuk menampilkan seluruh hari piketnya pada bulan {namaBulan[viewMonth - 1]} {viewYear}.
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setSdmFilterSubMenuOpen(false)}
-                className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-3d-button cursor-pointer"
-              >
-                Terapkan Filter & Lihat Halaman
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- SUB-MENU MODAL 2: LOG TUKAR PIKET (ADMIN) (LAMA) --- */}
-      {isAdmin && logsSubMenuOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-lg p-5 sm:p-7 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-2xl relative space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button onClick={() => setLogsSubMenuOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <div className="flex justify-between items-center pr-8">
-              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                <FontAwesomeIcon icon={faHistory} className="text-amber-400" />
-                <span>Sub-Menu Log Tukar ({namaBulan[viewMonth - 1]} {viewYear})</span>
-              </h3>
-              {swapLogs.length > 0 && (
-                <button
-                  onClick={handleClearAllLogs}
-                  className="px-2.5 py-1 rounded-xl bg-rose-600/30 border border-rose-500/50 hover:bg-rose-600 text-rose-300 hover:text-white text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
-                >
-                  <FontAwesomeIcon icon={faTrashAlt} />
-                  <span>Bersihkan Semua</span>
-                </button>
-              )}
-            </div>
-
-            <div className="max-h-72 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
-              {swapLogs.length > 0 ? (
-                swapLogs.map((log) => (
-                  <div key={log.id} className="p-3 rounded-2xl bg-slate-950 border border-white/10 flex justify-between items-center text-xs">
-                    <div>
-                      <p className="text-amber-300 font-bold">
-                        {getStaffName(log.staffA)} {log.dayNumberA ? `(Tgl ${log.dayNumberA})` : ''} ⇄ {getStaffName(log.staffB)} {log.dayNumberB ? `(Tgl ${log.dayNumberB})` : ''}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Riwayat Bertukar'}
-                      </p>
-                    </div>
+          <div className="space-y-3 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+            {infoList.length > 0 ? (
+              infoList.map((info) => (
+                <div key={info.id} className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/80 border border-white/10 relative group hover:border-amber-500/40 transition-all">
+                  <div className="flex justify-between items-start gap-2 mb-1">
+                    <span className="font-bold text-amber-300 text-xs break-words">{info.title}</span>
+                    <span className="text-[9px] text-slate-400 shrink-0">{info.dateStr || '-'}</span>
+                  </div>
+                  <p className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{info.content}</p>
+                  {isAdmin && (
                     <button
-                      onClick={() => handleDeleteLog(log.id)}
-                      className="text-slate-400 hover:text-rose-400 p-1.5 transition-colors cursor-pointer"
-                      title="Hapus Log Ini"
+                      onClick={() => handleDeleteInfo(info.id)}
+                      className="mt-2 text-[10px] text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 cursor-pointer"
                     >
                       <FontAwesomeIcon icon={faTrashAlt} />
+                      <span>Hapus</span>
                     </button>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-center text-xs text-slate-500 py-6 italic">Belum ada pengumuman diterbitkan.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-indigo-500/30 backdrop-blur-xl shadow-3d-glass space-y-4">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-indigo-400">
+              <FontAwesomeIcon icon={faStickyNote} className="text-lg sm:text-xl" />
+              <h2 className="text-sm sm:text-lg font-bold text-white">Catatan Operasional SDM</h2>
+            </div>
+            <span className="text-[10px] font-bold text-indigo-300 bg-indigo-950/80 px-2.5 py-1 rounded-full border border-indigo-500/30">
+              {notesList.length} Catatan
+            </span>
+          </div>
+
+          <div className="space-y-3 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+            {notesList.length > 0 ? (
+              notesList.map((note) => (
+                <div key={note.id} className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/80 border border-white/10 relative group hover:border-indigo-500/40 transition-all">
+                  <div className="flex justify-between items-start gap-2 mb-1">
+                    <span className="font-bold text-indigo-300 text-xs break-words">{note.title}</span>
+                    <span className="text-[9px] text-slate-400 shrink-0">{note.dateStr || '-'}</span>
+                  </div>
+                  <p className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{note.content}</p>
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleDeleteNote(note.id)}
+                      className="mt-2 text-[10px] text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <FontAwesomeIcon icon={faTrashAlt} />
+                      <span>Hapus</span>
+                    </button>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-center text-xs text-slate-500 py-6 italic">Belum ada catatan operasional ditambahkan.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* STATUS CARDS MINIMALIS (PIKET, AGENDA KECIL, & SWAP) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 w-full">
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-emerald-400/60">
+          <div className="flex items-center gap-2.5 mb-3 sm:mb-4 text-emerald-400 shrink-0">
+            <FontAwesomeIcon icon={faUserShield} className="text-lg sm:text-xl" />
+            <h3 className="font-bold text-base sm:text-lg text-white">Piket Hari Ini</h3>
+          </div>
+          <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
+            {safeTodayPiket.length > 0 ? (
+              safeTodayPiket.map((p, idx) => {
+                const staffId = typeof p === 'object' && p !== null ? (p.staffId || p.id || p.name || p.NAMA || p.nama || JSON.stringify(p)) : p;
+                return (
+                  <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 flex justify-between items-center hover:bg-emerald-500/10 transition-colors">
+                    <span className="font-semibold text-slate-100 text-xs sm:text-sm truncate">{getStaffName(staffId)}</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399] shrink-0"></span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="flex items-center justify-center h-full py-6 sm:py-0">
+                <p className="text-xs sm:text-sm text-slate-400 italic">Tidak ada jadwal piket aktif hari ini.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-cyan-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-cyan-400/60">
+          <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0 flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-cyan-400">
+              <FontAwesomeIcon icon={faCalendarCheck} className="text-base sm:text-lg" />
+              <h3 className="font-bold text-sm sm:text-base text-white">Agenda SDM</h3>
+            </div>
+            <div className="flex bg-slate-950 p-1 rounded-xl border border-white/10">
+              <button
+                onClick={() => setAgendaTab('today')}
+                className={`px-2 py-1 rounded-lg text-[9px] sm:text-[10px] font-bold transition-all cursor-pointer ${
+                  agendaTab === 'today' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Hari Ini ({activeTodayAgenda.length})
+              </button>
+              <button
+                onClick={() => setAgendaTab('upcoming3')}
+                className={`px-2 py-1 rounded-lg text-[9px] sm:text-[10px] font-bold transition-all cursor-pointer ${
+                  agendaTab === 'upcoming3' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                3 Hari Kerja ({activeUpcomingAgenda.length})
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
+            {agendaTab === 'today' ? (
+              activeTodayAgenda.length > 0 ? (
+                activeTodayAgenda.map((ag, idx) => (
+                  <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-cyan-500/10 transition-colors">
+                    <span className="font-bold text-cyan-200 block text-xs sm:text-sm break-words">{ag.title}</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-300 block mt-1">
+                      📍 Desa {ag.desa || '-'}, Kec. {ag.kecamatan || '-'} | ⏰ {ag.time}
+                    </span>
+                    {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
+                      <span className="text-[9px] sm:text-[10px] text-amber-300 block mt-0.5 break-words">
+                        📝 {ag.modulP2K2} - {ag.sesiP2K2}
+                      </span>
+                    )}
+                    {ag.sdmName && (
+                      <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5">
+                        👤 SDM: {ag.sdmName}
+                      </span>
+                    )}
+                    {ag.isSupervisiKatim && (
+                      <span className="text-[9px] text-amber-400 font-bold block mt-0.5">
+                        🛡️ Disupervisi Ketua Tim
+                      </span>
+                    )}
                   </div>
                 ))
               ) : (
-                <p className="text-center text-xs text-slate-500 py-6 italic">Belum ada riwayat log pertukaran piket.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- MODAL BARU: SUB-MENU ABSEN PIKET, HITUNGAN & RIWAYAT --- */}
-      {absenSubMenuOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-2xl p-5 sm:p-7 rounded-3xl bg-slate-900 border border-teal-500/40 shadow-2xl relative space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <button 
-              onClick={() => setAbsenSubMenuOpen(false)} 
-              className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"
-            >
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2.5 border-b border-white/10 pb-3">
-              <FontAwesomeIcon icon={faClipboardCheck} className="text-teal-400" />
-              <span>Absen Piket & Rekapitulasi</span>
-            </h3>
-
-            {/* SEGMEN 1: FORM ABSENSI HARIAN */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-black text-teal-300 uppercase tracking-wide flex items-center gap-1.5">
-                <FontAwesomeIcon icon={faCheck} /> Form Absen Tanggal Tugas
-              </h4>
-              <div className="p-4 rounded-2xl bg-slate-950/80 border border-teal-500/20">
-                <label className="text-[11px] font-semibold text-slate-400 block mb-2">Pilih Tanggal Untuk Diabsen:</label>
-                <select
-                  value={absenSelectedDate}
-                  onChange={(e) => setAbsenSelectedDate(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-teal-500/30 text-white text-xs outline-none focus:border-teal-400 cursor-pointer mb-3"
-                >
-                  <option value="">-- Pilih Tanggal Tugas --</option>
-                  {Object.entries(currentSchedule)
-                    .filter(([key, val]) => key !== 'isLocked' && !val.isHoliday)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([dStr, dData]) => (
-                      <option key={dStr} value={dStr}>
-                        {dData.dayName}, {dData.dayNumber} {namaBulan[viewMonth - 1]} {viewYear}
-                      </option>
-                    ))}
-                </select>
-
-                {absenSelectedDate && currentSchedule[absenSelectedDate] ? (
-                  <div className="space-y-2 mt-2">
-                    <p className="text-[10px] text-slate-400">Daftar Petugas di Tanggal {new Date(absenSelectedDate).getDate()}:</p>
-                    {Array.isArray(currentSchedule[absenSelectedDate].assigned) && currentSchedule[absenSelectedDate].assigned.length > 0 ? (
-                      currentSchedule[absenSelectedDate].assigned.map(staffId => {
-                        const currentStatus = attendanceData[absenSelectedDate]?.[staffId]?.status;
-                        return (
-                          <div key={staffId} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-xl bg-slate-800 border border-white/5 gap-2">
-                            <span className="text-xs font-bold text-white uppercase">{getStaffName(staffId)}</span>
-                            
-                            <div className="flex gap-1.5 w-full sm:w-auto">
-                              <button
-                                onClick={() => handleSetAttendance(absenSelectedDate, staffId, 'Hadir')}
-                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                                  currentStatus === 'Hadir' ? 'bg-teal-500 text-white shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-teal-600/50'
-                                }`}
-                              >
-                                Hadir
-                              </button>
-                              <button
-                                onClick={() => handleSetAttendance(absenSelectedDate, staffId, 'Izin/Sakit')}
-                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                                  currentStatus === 'Izin/Sakit' ? 'bg-amber-500 text-white shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-amber-600/50'
-                                }`}
-                              >
-                                Izin/Sakit
-                              </button>
-                              <button
-                                onClick={() => handleSetAttendance(absenSelectedDate, staffId, 'Alpa')}
-                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                                  currentStatus === 'Alpa' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-rose-600/50'
-                                }`}
-                              >
-                                Alpa
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })
-                    ) : (
-                      <p className="text-xs text-rose-400 italic">Tidak ada petugas yang ditugaskan pada tanggal ini.</p>
+                <div className="flex items-center justify-center h-full py-6 sm:py-0">
+                  <p className="text-xs text-slate-400 italic">Belum ada agenda terdaftar hari ini.</p>
+                </div>
+              )
+            ) : (
+              activeUpcomingAgenda.length > 0 ? (
+                activeUpcomingAgenda.map((ag, idx) => (
+                  <div key={idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-indigo-500/20 hover:bg-indigo-500/10 transition-colors">
+                    <div className="flex justify-between items-center mb-1 gap-1">
+                      <span className="font-bold text-indigo-200 block text-xs truncate flex-1">{ag.title}</span>
+                      <span className="text-[9px] font-bold text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-500/30 shrink-0">
+                        {ag.date}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-300 block">
+                      📍 Desa {ag.desa || '-'}, Kec. {ag.kecamatan || '-'} | ⏰ {ag.time}
+                    </span>
+                    {ag.category && ag.category.toUpperCase().includes('P2K2') && ag.modulP2K2 && (
+                      <span className="text-[9px] text-amber-300 block mt-0.5 break-words">
+                        📝 {ag.modulP2K2} - {ag.sesiP2K2}
+                      </span>
+                    )}
+                    {ag.sdmName && (
+                      <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5">
+                        👤 SDM: {ag.sdmName}
+                      </span>
+                    )}
+                    {ag.isSupervisiKatim && (
+                      <span className="text-[9px] text-amber-400 font-bold block mt-0.5">
+                        🛡️ Disupervisi Ketua Tim
+                      </span>
                     )}
                   </div>
-                ) : (
-                  <p className="text-[10px] text-slate-500 italic">Pilih tanggal di atas untuk melihat dan mengisi absen.</p>
-                )}
-              </div>
-            </div>
-
-            {/* SEGMEN 2: HITUNGAN STATISTIK & RIWAYAT ABSEN */}
-            <div className="space-y-3 pt-3">
-              <h4 className="text-xs font-black text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
-                <FontAwesomeIcon icon={faHistory} /> Hitungan & Riwayat Piket Bulanan
-              </h4>
-              <div className="p-4 rounded-2xl bg-slate-950/80 border border-indigo-500/20">
-                <label className="text-[11px] font-semibold text-slate-400 block mb-2">Pilih SDM untuk Melihat Statistik:</label>
-                <select
-                  value={absenSelectedStaff}
-                  onChange={(e) => setAbsenSelectedStaff(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-indigo-500/30 text-white text-xs outline-none focus:border-indigo-400 cursor-pointer"
-                >
-                  <option value="">-- Pilih Petugas / SDM --</option>
-                  {staffList.map((s, idx) => (
-                    <option key={s.id || s.key || idx} value={s.id || s.key || idx}>
-                      {s.name || s.NAMA || s.nama || s.id}
-                    </option>
-                  ))}
-                </select>
-
-                {absenSelectedStaff && absenStats[absenSelectedStaff] ? (
-                  <div className="mt-4 space-y-4">
-                    {/* KOTAK HITUNGAN */}
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="p-3 rounded-xl bg-slate-800 border border-white/5 text-center">
-                        <span className="text-[10px] text-slate-400 block uppercase">Total Jatah</span>
-                        <span className="text-lg font-black text-white">{absenStats[absenSelectedStaff].totalJatah}</span>
-                      </div>
-                      <div className="p-3 rounded-xl bg-teal-900/40 border border-teal-500/30 text-center">
-                        <span className="text-[10px] text-teal-400 block uppercase">Total Hadir</span>
-                        <span className="text-lg font-black text-teal-300">{absenStats[absenSelectedStaff].totalHadir}</span>
-                      </div>
-                      <div className="p-3 rounded-xl bg-rose-900/40 border border-rose-500/30 text-center">
-                        <span className="text-[10px] text-rose-400 block uppercase">Tdk Hadir</span>
-                        <span className="text-lg font-black text-rose-300">{absenStats[absenSelectedStaff].totalTidak}</span>
-                      </div>
-                    </div>
-
-                    {/* DAFTAR RIWAYAT HARIAN */}
-                    <div>
-                      <p className="text-[10px] text-slate-400 mb-2">Rincian Riwayat Tugas Bulan Ini:</p>
-                      <div className="max-h-40 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                        {absenStats[absenSelectedStaff].riwayat.length > 0 ? (
-                          absenStats[absenSelectedStaff].riwayat.map((riwayat, idx) => (
-                            <div key={idx} className="flex justify-between items-center p-2.5 rounded-xl bg-slate-900 border border-white/5 text-xs">
-                              <span className="font-bold text-slate-300">
-                                {riwayat.dayName}, {riwayat.dayNumber} {namaBulan[viewMonth - 1]}
-                              </span>
-                              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase ${
-                                riwayat.status === 'Hadir' ? 'bg-teal-500/20 text-teal-400' :
-                                riwayat.status === 'Belum Absen' ? 'bg-slate-700 text-slate-400' :
-                                'bg-rose-500/20 text-rose-400'
-                              }`}>
-                                {riwayat.status}
-                              </span>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-[10px] italic text-slate-500 text-center py-2 border border-dashed border-white/10 rounded-xl">Belum ada jatah tugas untuk bulan ini.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[10px] text-slate-500 italic mt-3">Silakan pilih nama SDM untuk melihat rekap hitungan dan riwayat.</p>
-                )}
-              </div>
-            </div>
-
+                ))
+              ) : (
+                <div className="flex items-center justify-center h-full py-6 sm:py-0">
+                  <p className="text-xs text-slate-400 italic">Tidak ada agenda pada 3 Hari kerja ke depan.</p>
+                </div>
+              )
+            )}
           </div>
         </div>
-      )}
 
-      {/* --- MODAL 3: GENERATE PIKET (LAMA) --- */}
-      {genModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
-          <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl relative space-y-5">
-            <button onClick={() => setGenModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <FontAwesomeIcon icon={faSync} className="text-indigo-400" />
-              <span>Acak Piket Otomatis</span>
-            </h3>
-
-            {isScheduleLocked && (
-              <div className="p-3.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-2">
-                <FontAwesomeIcon icon={faLock} />
-                <span>Jadwal bulan ini DIKUNCI. Mengacak ulang akan memperbarui jadwal.</span>
+        <div className="p-4 sm:p-6 rounded-3xl bg-slate-900/60 border border-purple-500/30 backdrop-blur-xl shadow-3d-glass hover:-translate-y-1 transition-all duration-300 flex flex-col h-full max-h-80 hover:border-purple-400/60">
+          <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
+            <div className="flex items-center gap-2.5 text-purple-400">
+              <FontAwesomeIcon icon={faExchangeAlt} className="text-lg sm:text-xl" />
+              <h3 className="font-bold text-base sm:text-lg text-white">Laporan Pertukaran Piket</h3>
+            </div>
+            {isAdmin && validSwapLogs.length > 0 && (
+              <button
+                onClick={handleClearAllLogs}
+                className="px-2 py-1 rounded-xl bg-rose-600/30 border border-rose-500/50 hover:bg-rose-600 text-rose-300 hover:text-white text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                title="Hapus Semua Log Pertukaran"
+              >
+                <FontAwesomeIcon icon={faTrashAlt} />
+                <span>Hapus</span>
+              </button>
+            )}
+          </div>
+          <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
+            {validSwapLogs.length > 0 ? (
+              validSwapLogs.map((log, idx) => (
+                <div key={log.id || idx} className="p-2.5 sm:p-3 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 space-y-1 relative group hover:bg-purple-500/10 transition-colors">
+                  <div className="font-bold text-purple-300 flex items-center justify-between gap-1 leading-tight">
+                    <span className="truncate flex-1">{getStaffName(log.staffA)} {log.dayNumberA ? `(Tgl ${log.dayNumberA})` : ''}</span>
+                    <span className="text-amber-400 px-0.5 shrink-0">⇄</span>
+                    <span className="truncate flex-1 text-right">{getStaffName(log.staffB)} {log.dayNumberB ? `(Tgl ${log.dayNumberB})` : ''}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <p className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold truncate">✓ Resmi Bertukar</p>
+                    {isAdmin && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button onClick={() => handleOpenEditLog(log)} className="text-slate-400 hover:text-cyan-400 text-xs p-1 transition-colors cursor-pointer"><FontAwesomeIcon icon={faEdit} /></button>
+                        <button onClick={() => handleDeleteSingleLog(log.id)} className="text-slate-400 hover:text-rose-400 text-xs p-1 transition-colors cursor-pointer"><FontAwesomeIcon icon={faTrashAlt} /></button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="flex items-center justify-center h-full py-6 sm:py-0">
+                <p className="text-xs text-slate-400 italic">Belum ada riwayat pertukaran piket.</p>
               </div>
             )}
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-2">Bulan Target Acak</label>
-                <select
-                  value={genMonth}
-                  onChange={(e) => setGenMonth(Number(e.target.value))}
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-sm outline-none focus:border-indigo-500"
-                >
-                  {namaBulan.map((bulan, idx) => (
-                    <option key={idx + 1} value={idx + 1}>{bulan}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-2">Tahun Target</label>
-                <select
-                  value={genYear}
-                  onChange={(e) => setGenYear(Number(e.target.value))}
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-sm outline-none focus:border-indigo-500"
-                >
-                  {[2025, 2026, 2027, 2028, 2029, 2030].map((yr) => (
-                    <option key={yr} value={yr}>Tahun {yr}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setGenModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleGeneratePiket}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg cursor-pointer"
-              >
-                Mulai Acak & Simpan ({namaBulan[genMonth - 1]} {genYear})
-              </button>
-            </div>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* --- MODAL 4: INISIASI TUKAR & MANAJEMEN HAPUS PETUGAS PIKET (LAMA) --- */}
-      {swapModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
-          <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-3d-glass relative space-y-4">
-            <button onClick={() => setSwapModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <FontAwesomeIcon icon={faExchangeAlt} className="text-amber-400" />
-              <span>{isAdmin ? 'Kelola / Tukar Piket (Mode Admin)' : 'Ajukan Tukar Piket'}</span>
-            </h3>
-
-            <p className="text-xs text-slate-300">
-              Petugas Terpilih: <span className="font-bold text-amber-300">{getStaffName(selectedStaffA)}</span> (Tanggal {new Date(selectedDateA).getDate()})
-            </p>
-
-            <form onSubmit={handleCreateSwapRequest} className="space-y-4">
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Pilih Tanggal Pasangan Tukar</label>
-                <select
-                  value={selectedDateB}
-                  onChange={(e) => setSelectedDateB(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-amber-500 cursor-pointer"
-                >
-                  <option value="">-- Pilih Tanggal --</option>
-                  {Object.keys(currentSchedule).filter(k => k !== 'isLocked').map((dStr) => (
-                    <option key={dStr} value={dStr}>
-                      Tanggal {currentSchedule[dStr].dayNumber} ({currentSchedule[dStr].dayName})
-                    </option>
-                  ))}
-                </select>
+      {/* MODAL COMPONENTS TETAP UTUH (DIKUNCI MATI) */}
+      {editLogModalOpen && editingLog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-md p-5 sm:p-7 rounded-3xl bg-slate-900 border border-purple-500/50 shadow-2xl relative space-y-4 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button onClick={() => { setEditLogModalOpen(false); setEditingLog(null); }} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"><FontAwesomeIcon icon={faTimes} /></button>
+            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2"><FontAwesomeIcon icon={faEdit} className="text-purple-400" /><span>Edit Riwayat Pertukaran Piket</span></h3>
+            <form onSubmit={handleSaveEditedLog} className="space-y-4">
+              <div className="p-3 rounded-2xl bg-slate-950 border border-white/10 space-y-3">
+                <span className="text-xs font-bold text-indigo-300 block">Pihak Pertama (SDM A)</span>
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">Nama SDM A</label>
+                  <select value={editingLog.staffA || ''} onChange={(e) => setEditingLog({ ...editingLog, staffA: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"><option value="">-- Pilih SDM --</option>{staffList.map((s) => { const sId = typeof s === 'object' ? s.id || s.name : s; const sName = typeof s === 'object' ? s.name || s.NAMA || s.id : s; return <option key={sId} value={sId}>{sName}</option>; })}</select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">Tanggal Piket SDM A</label>
+                  <input type="number" value={editingLog.dayNumberA || ''} onChange={(e) => setEditingLog({ ...editingLog, dayNumberA: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none" />
+                </div>
               </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Pilih Petugas Pasangan Tukar</label>
-                <select
-                  value={selectedStaffB}
-                  onChange={(e) => setSelectedStaffB(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-amber-500 cursor-pointer"
-                >
-                  <option value="">-- Pilih Petugas --</option>
-                  {(currentSchedule[selectedDateB]?.assigned || []).map((sId) => (
-                    <option key={sId} value={sId}>{getStaffName(sId)}</option>
-                  ))}
-                </select>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-white/10 space-y-3">
+                <span className="text-xs font-bold text-cyan-300 block">Pihak Kedua (SDM B)</span>
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">Nama SDM B</label>
+                  <select value={editingLog.staffB || ''} onChange={(e) => setEditingLog({ ...editingLog, staffB: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none"><option value="">-- Pilih SDM --</option>{staffList.map((s) => { const sId = typeof s === 'object' ? s.id || s.name : s; const sName = typeof s === 'object' ? s.name || s.NAMA || s.id : s; return <option key={sId} value={sId}>{sName}</option>; })}</select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">Tanggal Piket SDM B</label>
+                  <input type="number" value={editingLog.dayNumberB || ''} onChange={(e) => setEditingLog({ ...editingLog, dayNumberB: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none" />
+                </div>
               </div>
-
-              <button
-                type="submit"
-                className={`w-full py-3 rounded-2xl font-bold text-xs shadow-3d-button transition-all cursor-pointer ${
-                  isAdmin ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'
-                }`}
-              >
-                {isAdmin ? 'Eksekusi Tukar Instan (Tanpa Tanda & Tanpa Menunggu)' : 'Kirim Pengajuan (Batas 8 Jam Konfirmasi)'}
-              </button>
-
-              {/* TOMBOL KHUSUS ADMIN: HAPUS PETUGAS SATUAN */}
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={handleRemoveStaffFromDate}
-                  className="w-full py-2.5 rounded-2xl bg-rose-600/30 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer mt-2"
-                >
-                  <FontAwesomeIcon icon={faTrashAlt} />
-                  <span>Hapus {getStaffName(selectedStaffA)} dari Tanggal Ini</span>
-                </button>
-              )}
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => { setEditLogModalOpen(false); setEditingLog(null); }} className="px-4 py-2 rounded-xl bg-white/10 text-white text-xs font-semibold cursor-pointer">Batal</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"><FontAwesomeIcon icon={faSave} /><span>Simpan Perubahan</span></button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* --- MODAL 5: KONFIRMASI DUA PIHAK USER BIASA (LAMA) --- */}
-      {confirmModalOpen && activeRequest && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
-          <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-amber-500/50 shadow-3d-glass relative space-y-5">
-            <button onClick={() => setConfirmModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            <div className="flex items-center gap-3 text-amber-400">
-              <FontAwesomeIcon icon={faExchangeAlt} className="text-2xl" />
-              <div>
-                <h3 className="text-base font-bold text-white">Konfirmasi Persetujuan Tukar</h3>
-                <p className="text-[10px] text-amber-300 font-semibold flex items-center gap-1 mt-0.5">
-                  <FontAwesomeIcon icon={faClock} />
-                  <span>Sisa Waktu: {renderCountdown(activeRequest.timestamp)}</span>
-                </p>
-              </div>
+      {isNotesModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-lg p-5 sm:p-8 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-3d-glass relative animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button onClick={() => setIsNotesModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"><FontAwesomeIcon icon={faTimes} /></button>
+            <div className="flex items-center gap-2.5 mb-5 text-amber-400"><FontAwesomeIcon icon={faInfoCircle} className="text-xl sm:text-2xl" /><h3 className="text-base sm:text-xl font-bold text-white">Standar Operasional Tugas Piket</h3></div>
+            <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+              {piketNotes.map((note, idx) => (
+                <div key={idx} className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start gap-3 text-xs text-slate-200">
+                  <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                  <span className="leading-relaxed">{note}</span>
+                </div>
+              ))}
             </div>
-
-            <div className="p-4 rounded-2xl bg-slate-950 border border-white/10 space-y-2 text-xs text-slate-200">
-              <p>• <span className="font-bold text-amber-300">{getStaffName(activeRequest.staffA)}</span> (Tanggal {activeRequest.dayNumberA})</p>
-              <p>• <span className="font-bold text-cyan-300">{getStaffName(activeRequest.staffB)}</span> (Tanggal {activeRequest.dayNumberB})</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div>
-                <span className="text-[10px] text-slate-400 block mb-1.5">{getStaffName(activeRequest.staffA)}:</span>
-                <button
-                  onClick={() => handleToggleApprove('A')}
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                    activeRequest.approvedA ? 'bg-emerald-600 text-white shadow-md' : 'bg-white/10 hover:bg-emerald-600/50 text-slate-200'
-                  }`}
-                >
-                  <FontAwesomeIcon icon={faUserCheck} className="mr-1" />
-                  {activeRequest.approvedA ? '✓ Setuju' : 'Klik Setuju'}
-                </button>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-slate-400 block mb-1.5">{getStaffName(activeRequest.staffB)}:</span>
-                <button
-                  onClick={() => handleToggleApprove('B')}
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                    activeRequest.approvedB ? 'bg-emerald-600 text-white shadow-md' : 'bg-white/10 hover:bg-emerald-600/50 text-slate-200'
-                  }`}
-                >
-                  <FontAwesomeIcon icon={faUserCheck} className="mr-1" />
-                  {activeRequest.approvedB ? '✓ Setuju' : 'Klik Setuju'}
-                </button>
-              </div>
-            </div>
-
-            <button
-              onClick={async () => {
-                await remove(ref(db, `swapRequests/${activeRequest.id}`));
-                setConfirmModalOpen(false);
-                showToast('Pengajuan tukar piket dibatalkan.', 'info');
-              }}
-              className="w-full py-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 font-semibold text-xs transition-all cursor-pointer"
-            >
-              Batalkan Pengajuan Tukar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* --- MODAL 6: TAMBAH PETUGAS PIKET MANUAL (KHUSUS ADMIN) DENGAN LOGIKA KETAT (LAMA) --- */}
-      {isAdmin && addModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
-          <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-emerald-500/40 shadow-3d-glass relative space-y-4">
-            <button onClick={() => setAddModalOpen(false)} className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer">
-              <FontAwesomeIcon icon={faTimes} />
-            </button>
-            
-            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <FontAwesomeIcon icon={faUserCheck} className="text-emerald-400" />
-              <span>Tambah Petugas Manual</span>
-            </h3>
-            <p className="text-[11px] text-emerald-300 font-semibold bg-emerald-950/50 p-2 rounded-xl border border-emerald-500/30">
-              Pilih petugas untuk ditambahkan ke: <strong>Tanggal {new Date(selectedDateToAdd).getDate()} {namaBulan[viewMonth - 1]} {viewYear}</strong>
-            </p>
-
-            <form onSubmit={handleAddStaff} className="space-y-4 pt-1">
-              <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1.5">Daftar Semua Petugas Terdaftar</label>
-                <select
-                  value={selectedStaffToAdd}
-                  onChange={(e) => setSelectedStaffToAdd(e.target.value)}
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-emerald-500 cursor-pointer"
-                >
-                  <option value="">-- Pilih Petugas yang Akan Ditambahkan --</option>
-                  {staffList.map((s) => (
-                    <option key={s.id || s.key} value={s.id || s.key}>
-                      {s.name || s.NAMA || s.nama || s.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              <button
-                type="submit"
-                className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-3d-button transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <FontAwesomeIcon icon={faPlus} />
-                <span>Validasi & Simpan Penambahan</span>
-              </button>
-            </form>
+            <button onClick={() => setIsNotesModalOpen(false)} className="w-full mt-5 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs sm:text-sm shadow-3d-button transition-all cursor-pointer active:scale-95">Saya Mengerti</button>
           </div>
         </div>
       )}
