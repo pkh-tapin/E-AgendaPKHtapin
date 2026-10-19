@@ -25,8 +25,10 @@ import {
   faClipboardCheck, 
   faCheck,          
   faTimesCircle,
-  faMoneyBillWave, // TAMBAHAN UNTUK DENDA ADMIN
-  faCommentDots    // TAMBAHAN UNTUK KETERANGAN
+  faMoneyBillWave, 
+  faCommentDots,
+  faSignInAlt,    // TAMBAHAN ICON DATANG
+  faSignOutAlt    // TAMBAHAN ICON PULANG
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
@@ -489,9 +491,12 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
   const [attendanceData, setAttendanceData] = useState({});
   const [absenSelectedDate, setAbsenSelectedDate] = useState(todayStr);
 
-  // Modal Form Khusus Absen per Orang (Hadir, Izin, Alpa + Keterangan & Jam Kerja)
+  // Modal Form Khusus Absen per Orang (Hadir, Izin, Alpa + Keterangan & Jam Datang/Pulang)
   const [showAbsenFormModal, setShowAbsenFormModal] = useState(false);
-  const [absenFormData, setAbsenFormData] = useState({ dateStr: '', staffId: '', status: 'Hadir', keterangan: '', jamKerja: 4 });
+  const [absenFormData, setAbsenFormData] = useState({ 
+    dateStr: '', staffId: '', status: 'Hadir', keterangan: '', 
+    waktuDatang: '', waktuPulang: '', jamKerja: 0 
+  });
 
   useEffect(() => {
     const attRef = ref(db, `attendance/${currentMonthKey}`);
@@ -501,32 +506,65 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     return () => unsubscribe();
   }, [currentMonthKey]);
 
-  // Fungsi pengecekan izin akses tanggal (Hanya hari H kecuali Admin)
   const isDateAllowed = (targetDateStr) => {
     if (isAdmin) return true;
     return targetDateStr === todayStr;
   };
 
-  // Handler Buka Modal Form Absen
+  // FUNGSI KALKULATOR JAM OTOMATIS
+  const calculateHours = (start, end) => {
+    if (!start || !end) return 0;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    let diff = (eh + em/60) - (sh + sm/60);
+    if (diff < 0) diff += 24; // Mencegah hasil minus jika melintasi tengah malam
+    return parseFloat(diff.toFixed(2));
+  };
+
+  // HANDLER SET WAKTU SAAT INI (TOMBOL ABSEN DATANG/PULANG)
+  const handleAutoTime = (field) => {
+    const nowLocal = new Date();
+    const hhmm = `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}`;
+    setAbsenFormData(prev => {
+      const newData = { ...prev, [field]: hhmm };
+      if (newData.waktuDatang && newData.waktuPulang) {
+        newData.jamKerja = calculateHours(newData.waktuDatang, newData.waktuPulang);
+      }
+      return newData;
+    });
+  };
+
+  // HANDLER JIKA ADMIN KETIK/EDIT WAKTU MANUAL DI INPUT
+  const handleTimeChange = (field, val) => {
+    setAbsenFormData(prev => {
+      const newData = { ...prev, [field]: val };
+      if (newData.waktuDatang && newData.waktuPulang) {
+        newData.jamKerja = calculateHours(newData.waktuDatang, newData.waktuPulang);
+      }
+      return newData;
+    });
+  };
+
+  // Buka Modal Absen
   const handleOpenAbsenModal = (dateStr, staffId, defaultStatus = 'Hadir') => {
     if (isPublic) return showToast('Mode Publik tidak bisa mengisi absen.', 'error');
-    
     if (!isDateAllowed(dateStr)) {
        return showToast('User hanya diizinkan mengisi absen pada Hari Ini (H)!', 'error');
     }
-
     const existingAtt = attendanceData[dateStr]?.[staffId] || {};
     setAbsenFormData({
       dateStr,
       staffId,
       status: existingAtt.status || defaultStatus,
       keterangan: existingAtt.keterangan || '',
-      jamKerja: existingAtt.jamKerja !== undefined ? existingAtt.jamKerja : 4
+      waktuDatang: existingAtt.waktuDatang || '',
+      waktuPulang: existingAtt.waktuPulang || '',
+      jamKerja: existingAtt.jamKerja !== undefined ? existingAtt.jamKerja : 0
     });
     setShowAbsenFormModal(true);
   };
 
-  // Handler Simpan dari Modal Absen
+  // Simpan Absen via Modal
   const handleSubmitAbsen = async (e) => {
     e.preventDefault();
     if (isPublic) return;
@@ -534,8 +572,10 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     try {
       await set(ref(db, `attendance/${currentMonthKey}/${absenFormData.dateStr}/${absenFormData.staffId}`), {
         status: absenFormData.status,
-        keterangan: absenFormData.status !== 'Hadir' && absenFormData.status !== 'Alpa' ? absenFormData.keterangan : '',
+        keterangan: (absenFormData.status !== 'Hadir' && absenFormData.status !== 'Alpa') ? absenFormData.keterangan : '',
         jamKerja: absenFormData.status === 'Hadir' ? Number(absenFormData.jamKerja) : 0,
+        waktuDatang: absenFormData.status === 'Hadir' ? absenFormData.waktuDatang : '',
+        waktuPulang: absenFormData.status === 'Hadir' ? absenFormData.waktuPulang : '',
         timestamp: Date.now(),
         markedBy: isAdmin ? 'Admin' : 'Petugas'
       });
@@ -543,6 +583,20 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       setShowAbsenFormModal(false);
     } catch (err) {
       showToast('Gagal mencatat absen.', 'error');
+    }
+  };
+
+  // Hapus Absen Khusus Admin (CRUD LENGKAP)
+  const handleDeleteAbsen = async () => {
+    if (!isAdmin) return;
+    if (window.confirm(`Yakin ingin menghapus seluruh data absen ${getStaffName(absenFormData.staffId)} di tanggal ini?`)) {
+      try {
+        await remove(ref(db, `attendance/${currentMonthKey}/${absenFormData.dateStr}/${absenFormData.staffId}`));
+        showToast('Data absen berhasil dihapus secara permanen.', 'info');
+        setShowAbsenFormModal(false);
+      } catch (err) {
+        showToast('Gagal menghapus data absen.', 'error');
+      }
     }
   };
 
@@ -860,7 +914,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                 const staffAtt = attendanceData[dayData.dateStr]?.[staffId];
                                 const currentStatus = staffAtt ? staffAtt.status : null;
 
-                                // Modifikasi tag utama menjadi <div role="button"> agar tombol absen didalamnya aman (tidak nested button)
                                 return (
                                   <div
                                     key={staffId}
@@ -892,7 +945,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                     {!isPublic && (
                                       <button
                                         onClick={(e) => {
-                                          e.stopPropagation(); // Cegah masuk ke modal Tukar Piket
+                                          e.stopPropagation(); 
                                           handleOpenAbsenModal(dayData.dateStr, staffId, currentStatus || 'Hadir');
                                         }}
                                         className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-lg bg-teal-900/50 border border-teal-500/40 text-[10px] text-teal-400 hover:bg-teal-500 hover:text-white transition-all z-20 cursor-pointer"
@@ -912,10 +965,21 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                         }`}>
                                           {currentStatus === 'Hadir' ? '✓' : currentStatus === 'Alpa' ? '✗' : '⚠'} {currentStatus}
                                         </span>
-                                        {currentStatus === 'Hadir' && staffAtt.jamKerja !== undefined && (
-                                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/10">
-                                            <FontAwesomeIcon icon={faClock} className="mr-1" />{staffAtt.jamKerja} Jam
-                                          </span>
+                                      </div>
+                                    )}
+                                    {/* INFO JAM DATANG DAN PULANG */}
+                                    {currentStatus === 'Hadir' && staffAtt && (
+                                      <div className="mt-0.5 flex flex-col gap-0.5">
+                                        {staffAtt.waktuDatang && (
+                                           <span className="text-[8.5px] text-teal-200 font-medium">Masuk: {staffAtt.waktuDatang}</span>
+                                        )}
+                                        {staffAtt.waktuPulang && (
+                                           <span className="text-[8.5px] text-amber-200 font-medium">Pulang: {staffAtt.waktuPulang}</span>
+                                        )}
+                                        {staffAtt.jamKerja !== undefined && (
+                                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/10 w-fit mt-0.5">
+                                             <FontAwesomeIcon icon={faClock} className="mr-1" />{staffAtt.jamKerja} Jam
+                                           </span>
                                         )}
                                       </div>
                                     )}
@@ -994,11 +1058,11 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         )}
       </div>
 
-      {/* --- FORM ABSENSI (MODAL KECIL BARU) --- */}
+      {/* --- FORM ABSENSI (MODAL KECIL BARU DENGAN DATANG & PULANG) --- */}
       {showAbsenFormModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-sm p-6 rounded-3xl bg-slate-900 border border-teal-500/50 shadow-2xl relative">
-            <button onClick={() => setShowAbsenFormModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+          <div className="w-full max-w-sm p-6 rounded-3xl bg-slate-900 border border-teal-500/50 shadow-2xl relative max-h-[95vh] overflow-y-auto custom-scrollbar">
+            <button onClick={() => setShowAbsenFormModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer">
                <FontAwesomeIcon icon={faTimes} />
             </button>
             <h3 className="text-base font-black text-white flex items-center gap-2 mb-1">
@@ -1014,7 +1078,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                 <select
                   value={absenFormData.status}
                   onChange={(e) => setAbsenFormData({...absenFormData, status: e.target.value})}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-teal-400"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-teal-400 cursor-pointer"
                 >
                   <option value="Hadir">Hadir (Sesuai Jadwal)</option>
                   <option value="Izin/Sakit">Izin / Sakit / Alasan Lain</option>
@@ -1022,23 +1086,80 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                 </select>
               </div>
 
-              {/* INPUT JAM KERJA HANYA UNTUK HADIR */}
+              {/* INPUT JAM DATANG DAN PULANG HANYA JIKA HADIR */}
               {absenFormData.status === 'Hadir' && (
-                <div>
-                  <label className="text-xs font-bold text-slate-300 block mb-1.5 flex items-center gap-1">
-                    <FontAwesomeIcon icon={faClock} className="text-teal-300" /> Total Jam Piket Dilaksanakan
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="24"
-                    value={absenFormData.jamKerja}
-                    onChange={(e) => setAbsenFormData({...absenFormData, jamKerja: e.target.value})}
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs outline-none focus:border-teal-400"
-                    placeholder="Contoh: 4"
-                    required
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">Standar Piket: 4 Jam. Kurang jam akan diakumulasi ke dalam denda.</p>
+                <div className="space-y-3 bg-slate-950/60 p-3 rounded-xl border border-white/5">
+                  {/* ABSEN DATANG */}
+                  <div>
+                     <label className="text-[10px] text-slate-400 block mb-1 font-bold">Absen Datang (Clock In)</label>
+                     <div className="flex gap-2 items-center">
+                        {isAdmin ? (
+                           <input 
+                             type="time" 
+                             value={absenFormData.waktuDatang} 
+                             onChange={e => handleTimeChange('waktuDatang', e.target.value)} 
+                             className="flex-1 bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-teal-400"
+                           />
+                        ) : (
+                           <div className="flex-1 bg-slate-900 border border-white/10 px-3 py-2 rounded-lg text-white text-xs font-mono">
+                             {absenFormData.waktuDatang || '--:--'}
+                           </div>
+                        )}
+                        <button 
+                          type="button" 
+                          onClick={() => handleAutoTime('waktuDatang')} 
+                          className="px-3 py-2 bg-teal-600 hover:bg-teal-500 rounded-lg text-xs font-bold text-white shadow-sm transition-all cursor-pointer whitespace-nowrap"
+                        >
+                          <FontAwesomeIcon icon={faSignInAlt} /> Sekarang
+                        </button>
+                     </div>
+                  </div>
+
+                  {/* ABSEN PULANG */}
+                  <div>
+                     <label className="text-[10px] text-slate-400 block mb-1 font-bold">Absen Pulang (Clock Out)</label>
+                     <div className="flex gap-2 items-center">
+                        {isAdmin ? (
+                           <input 
+                             type="time" 
+                             value={absenFormData.waktuPulang} 
+                             onChange={e => handleTimeChange('waktuPulang', e.target.value)} 
+                             className="flex-1 bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-teal-400"
+                           />
+                        ) : (
+                           <div className="flex-1 bg-slate-900 border border-white/10 px-3 py-2 rounded-lg text-white text-xs font-mono">
+                             {absenFormData.waktuPulang || '--:--'}
+                           </div>
+                        )}
+                        <button 
+                          type="button" 
+                          onClick={() => handleAutoTime('waktuPulang')} 
+                          className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-xs font-bold text-white shadow-sm transition-all cursor-pointer whitespace-nowrap"
+                        >
+                          <FontAwesomeIcon icon={faSignOutAlt} /> Sekarang
+                        </button>
+                     </div>
+                  </div>
+
+                  {/* JAM KERJA */}
+                  <div className="pt-2 border-t border-white/10">
+                    <label className="text-xs font-bold text-slate-300 block mb-1.5 flex items-center gap-1">
+                      <FontAwesomeIcon icon={faClock} className="text-teal-300" /> Total Jam Piket Dijalankan
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="24"
+                      step="0.01"
+                      value={absenFormData.jamKerja}
+                      onChange={(e) => setAbsenFormData({...absenFormData, jamKerja: e.target.value})}
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-white text-xs outline-none focus:border-teal-400 cursor-not-allowed"
+                      placeholder="Terhitung otomatis..."
+                      readOnly={!isAdmin} // Hanya admin yang boleh over-ride manual
+                      required
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">Standar Piket: 4 Jam. Kurang jam akan diakumulasi ke dalam denda.</p>
+                  </div>
                 </div>
               )}
 
@@ -1058,12 +1179,23 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                 </div>
               )}
 
-              <button
-                type="submit"
-                className="w-full mt-2 py-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
-              >
-                Simpan Data Absen
-              </button>
+              <div className="flex gap-2 pt-2">
+                {isAdmin && (
+                   <button 
+                     type="button" 
+                     onClick={handleDeleteAbsen} 
+                     className="w-1/3 py-3 rounded-xl bg-rose-950/60 hover:bg-rose-900 text-rose-400 font-bold text-xs border border-rose-500/30 transition-all cursor-pointer"
+                   >
+                     Hapus Data
+                   </button>
+                )}
+                <button
+                  type="submit"
+                  className={`${isAdmin ? 'w-2/3' : 'w-full'} py-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer`}
+                >
+                  Simpan Data Absen
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -1204,7 +1336,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* --- MODAL 7 BARU: REKAPITULASI TABEL ABSENSI KESELURUHAN --- */}
+      {/* --- MODAL 7: REKAPITULASI TABEL ABSENSI KESELURUHAN (LAMA) --- */}
       {absenSubMenuOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-4xl p-5 sm:p-7 rounded-3xl bg-slate-900 border border-teal-500/40 shadow-2xl relative space-y-5 animate-fadeIn flex flex-col max-h-[90vh]">
@@ -1244,7 +1376,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                            <button
                              key={staffId}
                              onClick={() => handleOpenAbsenModal(absenSelectedDate, staffId)}
-                             className="px-3 py-2 text-[10px] font-bold rounded-lg bg-teal-600/30 border border-teal-500/50 hover:bg-teal-500 text-teal-200 hover:text-white transition-all whitespace-nowrap"
+                             className="px-3 py-2 text-[10px] font-bold rounded-lg bg-teal-600/30 border border-teal-500/50 hover:bg-teal-500 text-teal-200 hover:text-white transition-all whitespace-nowrap cursor-pointer"
                            >
                              Absen {getStaffName(staffId).split(' ')[0]}
                            </button>
