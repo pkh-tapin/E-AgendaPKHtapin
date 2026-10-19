@@ -21,7 +21,10 @@ import {
   faUser,
   faFilter,
   faCalendarCheck,
-  faPlus
+  faPlus,
+  faClipboardCheck, // TAMBAHAN UNTUK ABSEN
+  faCheck,          // TAMBAHAN UNTUK ABSEN
+  faTimesCircle     // TAMBAHAN UNTUK ABSEN
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function PiketView({ schedules = {}, staffList = [], config = {}, holidays = {}, isAdmin, isSdm }) {
@@ -450,10 +453,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       return showToast('Petugas tersebut sudah piket di tanggal ini!', 'error');
     }
 
-    // --- PERBAIKAN BUG DIMULAI DARI SINI ---
-    // HITUNG FREKUENSI UNTUK ATURAN KETAT
-    // BUG FIX: Menggunakan Object.entries agar dateStr pasti didapat dari "key" kalender.
-    // Ini memperbaiki masalah dimana array workingDays menjadi kosong dan menyebabkan Batas = 0.
     const workingDays = Object.entries(currentSchedule)
       .filter(([key, val]) => key !== 'isLocked' && val && typeof val === 'object' && !val.isHoliday)
       .map(([key, val]) => ({ dateStr: key, ...val }));
@@ -468,24 +467,20 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
     });
 
     const activeStaffCount = staffList.length || 1;
-    // SMART CALCULATION FIX: 
     const staffPerDay = config?.staffPerDay ? parseInt(config.staffPerDay, 10) : 2;
     const expectedTotalSlots = workingDays.length * staffPerDay;
     
-    // BUG FIX: Tambahkan fallback "|| 2" (atau sesuai staffPerDay) 
-    // agar pembagian mutlak tidak pernah bernilai 0
     const avgPerPerson = Math.ceil(expectedTotalSlots / activeStaffCount) || staffPerDay; 
     
     const currentCount = staffCounts[selectedStaffToAdd] || 0;
 
-    // VALIDASI KETAT 1 (HARD BLOCK): JIKA LEBIH JATAH MAKA KUNCI MATI (TIDAK BISA DISIMPAN)
+    // VALIDASI KETAT 1 (HARD BLOCK)
     if (currentCount >= avgPerPerson) {
       showToast(`TIDAK BISA DISIMPAN! Jatah piket ${getStaffName(selectedStaffToAdd)} sudah penuh (Batas: ${avgPerPerson} kali bulan ini). Semua harus terbagi rata!`, 'error');
-      return; // Berhenti eksekusi, blokir penyimpanan
+      return;
     }
-    // --- PERBAIKAN BUG SELESAI ---
 
-    // VALIDASI KETAT 2 (SOFT BLOCK): CEK JARAK TERDEKAT (Pemberitahuan jika <= 2 hari)
+    // VALIDASI KETAT 2 (SOFT BLOCK)
     let isTooClose = false;
     const addDateObj = new Date(selectedDateToAdd);
     workingDays.forEach(day => {
@@ -498,7 +493,6 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       }
     });
 
-    // PEMBERITAHUAN JARAK SEBELUM MENYIMPAN (Tetap bisa dilanjutkan oleh Admin jika setuju)
     if (isTooClose) {
       if (!window.confirm(`PERINGATAN LOGIKA:\n\nJarak hari piket ${getStaffName(selectedStaffToAdd)} terlalu dekat (≤ 2 Hari) dengan jadwal dia yang lain!\n\nKarena jatahnya belum penuh (${currentCount}/${avgPerPerson}), Anda tetap BISA MENYIMPANNYA secara paksa.\nTetap lanjutkan simpan?`)) {
         return;
@@ -519,6 +513,77 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
       showToast('Gagal menambahkan petugas ke database', 'error');
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // 6.7. BAGIAN BARU: STATE, EFFECT, & HANDLER ABSEN PIKET, HITUNGAN & RIWAYAT
+  // ---------------------------------------------------------------------------
+  const [absenSubMenuOpen, setAbsenSubMenuOpen] = useState(false);
+  const [attendanceData, setAttendanceData] = useState({});
+  const [absenSelectedDate, setAbsenSelectedDate] = useState(todayStr);
+  const [absenSelectedStaff, setAbsenSelectedStaff] = useState('');
+
+  // Fetch Data Absensi Realtime dari Firebase
+  useEffect(() => {
+    const attRef = ref(db, `attendance/${currentMonthKey}`);
+    const unsubscribe = onValue(attRef, (snapshot) => {
+      setAttendanceData(snapshot.val() || {});
+    });
+    return () => unsubscribe();
+  }, [currentMonthKey]);
+
+  // Handler Set Absen Harian
+  const handleSetAttendance = async (dateStr, staffId, status) => {
+    if (isPublic) return showToast('Akses Publik: Tidak bisa mengisi absen!', 'error');
+    try {
+      await set(ref(db, `attendance/${currentMonthKey}/${dateStr}/${staffId}`), {
+        status,
+        timestamp: Date.now(),
+        markedBy: isAdmin ? 'Admin' : 'Petugas'
+      });
+      showToast(`Absen ${status} untuk ${getStaffName(staffId)} berhasil dicatat!`, 'success');
+    } catch (err) {
+      showToast('Gagal mencatat absen.', 'error');
+    }
+  };
+
+  // Memoized: Hitungan & Riwayat Absen Per SDM untuk bulan ini
+  const absenStats = useMemo(() => {
+    const stats = {};
+    // Inisialisasi semua staf terdaftar
+    staffList.forEach(s => {
+      const sId = s.id || s.key;
+      stats[sId] = {
+        totalJatah: 0,
+        totalHadir: 0,
+        totalTidak: 0, // Alpa/Sakit/Izin
+        riwayat: []
+      };
+    });
+
+    Object.entries(currentSchedule).forEach(([dateStr, dayData]) => {
+      if (dateStr === 'isLocked' || !dayData.assigned) return;
+      const dayAtt = attendanceData[dateStr] || {};
+      
+      dayData.assigned.forEach(staffId => {
+        if (!stats[staffId]) return;
+        stats[staffId].totalJatah += 1;
+        
+        const status = dayAtt[staffId]?.status;
+        if (status === 'Hadir') stats[staffId].totalHadir += 1;
+        else if (status) stats[staffId].totalTidak += 1; // Any status besides Hadir
+
+        stats[staffId].riwayat.push({
+          dateStr,
+          dayNumber: dayData.dayNumber,
+          dayName: dayData.dayName,
+          status: status || 'Belum Absen'
+        });
+      });
+    });
+
+    return stats;
+  }, [currentSchedule, attendanceData, staffList]);
+
   // ---------------------------------------------------------------------------
   // 7. STRUKTURISASI MINGGU & RANGKUMAN FILTER SDM
   // ---------------------------------------------------------------------------
@@ -606,6 +671,15 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
               ))}
             </select>
           </div>
+
+          {/* SUB-MENU ABSEN PIKET (FITUR BARU) */}
+          <button
+            onClick={() => setAbsenSubMenuOpen(true)}
+            className="px-3 py-2 rounded-xl bg-teal-600/80 hover:bg-teal-500 border border-teal-500/50 text-white font-extrabold text-[11px] sm:text-xs shadow-md flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+          >
+            <FontAwesomeIcon icon={faClipboardCheck} />
+            <span>Absen Piket</span>
+          </button>
 
           {/* SUB-MENU FILTER JADWAL SDM */}
           <button
@@ -781,6 +855,9 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                 const showSwapHighlight = !isAdmin && isSwapped;
                                 const isFilteredSdm = filterStaffId && filterStaffId === staffId;
 
+                                // CEK STATUS ABSEN JIKA ADA
+                                const staffAtt = attendanceData[dayData.dateStr]?.[staffId]?.status;
+
                                 return (
                                   <button
                                     key={staffId}
@@ -805,6 +882,17 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
                                       </span>
                                       <FontAwesomeIcon icon={faExchangeAlt} className={`text-[10px] text-amber-400 shrink-0 opacity-80 sm:opacity-0 ${isPublic ? 'hidden' : 'group-hover:opacity-100'} transition-opacity`} />
                                     </div>
+
+                                    {/* BADGE ABSENSI */}
+                                    {staffAtt && (
+                                      <div className="mt-1 flex">
+                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
+                                          staffAtt === 'Hadir' ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                        }`}>
+                                          ✓ {staffAtt}
+                                        </span>
+                                      </div>
+                                    )}
 
                                     {/* KETERANGAN MENUNGGU TUKAR */}
                                     {pendingReq && (
@@ -878,7 +966,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         )}
       </div>
 
-      {/* SUB-MENU MODAL 1: FILTER JADWAL PER SDM */}
+      {/* --- SUB-MENU MODAL 1: FILTER JADWAL PER SDM (LAMA) --- */}
       {sdmFilterSubMenuOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-lg p-5 sm:p-7 rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl relative space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
@@ -969,7 +1057,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* SUB-MENU MODAL 2: LOG TUKAR PIKET (ADMIN) */}
+      {/* --- SUB-MENU MODAL 2: LOG TUKAR PIKET (ADMIN) (LAMA) --- */}
       {isAdmin && logsSubMenuOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
           <div className="w-full max-w-lg p-5 sm:p-7 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-2xl relative space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
@@ -1022,7 +1110,168 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* MODAL 3: GENERATE PIKET */}
+      {/* --- MODAL BARU: SUB-MENU ABSEN PIKET, HITUNGAN & RIWAYAT --- */}
+      {absenSubMenuOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-2xl p-5 sm:p-7 rounded-3xl bg-slate-900 border border-teal-500/40 shadow-2xl relative space-y-5 animate-fadeIn max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <button 
+              onClick={() => setAbsenSubMenuOpen(false)} 
+              className="absolute top-5 right-5 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <FontAwesomeIcon icon={faTimes} />
+            </button>
+
+            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2.5 border-b border-white/10 pb-3">
+              <FontAwesomeIcon icon={faClipboardCheck} className="text-teal-400" />
+              <span>Absen Piket & Rekapitulasi</span>
+            </h3>
+
+            {/* SEGMEN 1: FORM ABSENSI HARIAN */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-black text-teal-300 uppercase tracking-wide flex items-center gap-1.5">
+                <FontAwesomeIcon icon={faCheck} /> Form Absen Tanggal Tugas
+              </h4>
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-teal-500/20">
+                <label className="text-[11px] font-semibold text-slate-400 block mb-2">Pilih Tanggal Untuk Diabsen:</label>
+                <select
+                  value={absenSelectedDate}
+                  onChange={(e) => setAbsenSelectedDate(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-teal-500/30 text-white text-xs outline-none focus:border-teal-400 cursor-pointer mb-3"
+                >
+                  <option value="">-- Pilih Tanggal Tugas --</option>
+                  {Object.entries(currentSchedule)
+                    .filter(([key, val]) => key !== 'isLocked' && !val.isHoliday)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([dStr, dData]) => (
+                      <option key={dStr} value={dStr}>
+                        {dData.dayName}, {dData.dayNumber} {namaBulan[viewMonth - 1]} {viewYear}
+                      </option>
+                    ))}
+                </select>
+
+                {absenSelectedDate && currentSchedule[absenSelectedDate] ? (
+                  <div className="space-y-2 mt-2">
+                    <p className="text-[10px] text-slate-400">Daftar Petugas di Tanggal {new Date(absenSelectedDate).getDate()}:</p>
+                    {Array.isArray(currentSchedule[absenSelectedDate].assigned) && currentSchedule[absenSelectedDate].assigned.length > 0 ? (
+                      currentSchedule[absenSelectedDate].assigned.map(staffId => {
+                        const currentStatus = attendanceData[absenSelectedDate]?.[staffId]?.status;
+                        return (
+                          <div key={staffId} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 rounded-xl bg-slate-800 border border-white/5 gap-2">
+                            <span className="text-xs font-bold text-white uppercase">{getStaffName(staffId)}</span>
+                            
+                            <div className="flex gap-1.5 w-full sm:w-auto">
+                              <button
+                                onClick={() => handleSetAttendance(absenSelectedDate, staffId, 'Hadir')}
+                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                  currentStatus === 'Hadir' ? 'bg-teal-500 text-white shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-teal-600/50'
+                                }`}
+                              >
+                                Hadir
+                              </button>
+                              <button
+                                onClick={() => handleSetAttendance(absenSelectedDate, staffId, 'Izin/Sakit')}
+                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                  currentStatus === 'Izin/Sakit' ? 'bg-amber-500 text-white shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-amber-600/50'
+                                }`}
+                              >
+                                Izin/Sakit
+                              </button>
+                              <button
+                                onClick={() => handleSetAttendance(absenSelectedDate, staffId, 'Alpa')}
+                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                  currentStatus === 'Alpa' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-rose-600/50'
+                                }`}
+                              >
+                                Alpa
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <p className="text-xs text-rose-400 italic">Tidak ada petugas yang ditugaskan pada tanggal ini.</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-500 italic">Pilih tanggal di atas untuk melihat dan mengisi absen.</p>
+                )}
+              </div>
+            </div>
+
+            {/* SEGMEN 2: HITUNGAN STATISTIK & RIWAYAT ABSEN */}
+            <div className="space-y-3 pt-3">
+              <h4 className="text-xs font-black text-indigo-300 uppercase tracking-wide flex items-center gap-1.5">
+                <FontAwesomeIcon icon={faHistory} /> Hitungan & Riwayat Piket Bulanan
+              </h4>
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-indigo-500/20">
+                <label className="text-[11px] font-semibold text-slate-400 block mb-2">Pilih SDM untuk Melihat Statistik:</label>
+                <select
+                  value={absenSelectedStaff}
+                  onChange={(e) => setAbsenSelectedStaff(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-indigo-500/30 text-white text-xs outline-none focus:border-indigo-400 cursor-pointer"
+                >
+                  <option value="">-- Pilih Petugas / SDM --</option>
+                  {staffList.map((s, idx) => (
+                    <option key={s.id || s.key || idx} value={s.id || s.key || idx}>
+                      {s.name || s.NAMA || s.nama || s.id}
+                    </option>
+                  ))}
+                </select>
+
+                {absenSelectedStaff && absenStats[absenSelectedStaff] ? (
+                  <div className="mt-4 space-y-4">
+                    {/* KOTAK HITUNGAN */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="p-3 rounded-xl bg-slate-800 border border-white/5 text-center">
+                        <span className="text-[10px] text-slate-400 block uppercase">Total Jatah</span>
+                        <span className="text-lg font-black text-white">{absenStats[absenSelectedStaff].totalJatah}</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-teal-900/40 border border-teal-500/30 text-center">
+                        <span className="text-[10px] text-teal-400 block uppercase">Total Hadir</span>
+                        <span className="text-lg font-black text-teal-300">{absenStats[absenSelectedStaff].totalHadir}</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-rose-900/40 border border-rose-500/30 text-center">
+                        <span className="text-[10px] text-rose-400 block uppercase">Tdk Hadir</span>
+                        <span className="text-lg font-black text-rose-300">{absenStats[absenSelectedStaff].totalTidak}</span>
+                      </div>
+                    </div>
+
+                    {/* DAFTAR RIWAYAT HARIAN */}
+                    <div>
+                      <p className="text-[10px] text-slate-400 mb-2">Rincian Riwayat Tugas Bulan Ini:</p>
+                      <div className="max-h-40 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        {absenStats[absenSelectedStaff].riwayat.length > 0 ? (
+                          absenStats[absenSelectedStaff].riwayat.map((riwayat, idx) => (
+                            <div key={idx} className="flex justify-between items-center p-2.5 rounded-xl bg-slate-900 border border-white/5 text-xs">
+                              <span className="font-bold text-slate-300">
+                                {riwayat.dayName}, {riwayat.dayNumber} {namaBulan[viewMonth - 1]}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase ${
+                                riwayat.status === 'Hadir' ? 'bg-teal-500/20 text-teal-400' :
+                                riwayat.status === 'Belum Absen' ? 'bg-slate-700 text-slate-400' :
+                                'bg-rose-500/20 text-rose-400'
+                              }`}>
+                                {riwayat.status}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-[10px] italic text-slate-500 text-center py-2 border border-dashed border-white/10 rounded-xl">Belum ada jatah tugas untuk bulan ini.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-500 italic mt-3">Silakan pilih nama SDM untuk melihat rekap hitungan dan riwayat.</p>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL 3: GENERATE PIKET (LAMA) --- */}
       {genModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
           <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl relative space-y-5">
@@ -1090,7 +1339,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* MODAL 4: INISIASI TUKAR & MANAJEMEN HAPUS PETUGAS PIKET */}
+      {/* --- MODAL 4: INISIASI TUKAR & MANAJEMEN HAPUS PETUGAS PIKET (LAMA) --- */}
       {swapModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
           <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-3d-glass relative space-y-4">
@@ -1163,7 +1412,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* MODAL 5: KONFIRMASI DUA PIHAK USER BIASA */}
+      {/* --- MODAL 5: KONFIRMASI DUA PIHAK USER BIASA (LAMA) --- */}
       {confirmModalOpen && activeRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
           <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-amber-500/50 shadow-3d-glass relative space-y-5">
@@ -1229,7 +1478,7 @@ export default function PiketView({ schedules = {}, staffList = [], config = {},
         </div>
       )}
 
-      {/* MODAL 6: TAMBAH PETUGAS PIKET MANUAL (KHUSUS ADMIN) DENGAN LOGIKA KETAT */}
+      {/* --- MODAL 6: TAMBAH PETUGAS PIKET MANUAL (KHUSUS ADMIN) DENGAN LOGIKA KETAT (LAMA) --- */}
       {isAdmin && addModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-4 bg-black/70 backdrop-blur-md">
           <div className="w-full max-w-md p-6 rounded-3xl bg-slate-900 border border-emerald-500/40 shadow-3d-glass relative space-y-4">
